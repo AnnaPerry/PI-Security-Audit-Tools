@@ -56,6 +56,7 @@ Get functions from PI Data Archive library.
 	$listOfFunctions.Add("Get-PISysAudit_CheckExplicitLoginDisabled",1)
 	$listOfFunctions.Add("Get-PISysAudit_CheckPIAdminUsage",1)
 	$listOfFunctions.Add("Get-PISysAudit_CheckPISPN",1)
+	$listOfFunctions.Add("Get-PISysAudit_MyValidation",1)
 				
 	# Return the list.
 	return $listOfFunctions	
@@ -1141,6 +1142,72 @@ END {}
 #***************************
 }
 
+function Get-PISysAudit_MyValidation
+{
+<#  
+.SYNOPSIS
+AU2xxxx - <Name>
+.DESCRIPTION
+VALIDATION: <Enter what the verification checks>
+COMPLIANCE: <Enter what it needs to be compliant>
+#>
+[CmdletBinding(DefaultParameterSetName="Default", SupportsShouldProcess=$false)]     
+param(							
+		[parameter(Mandatory=$true, Position=0, ParameterSetName = "Default")]
+		[alias("at")]
+		[System.Collections.HashTable]
+		$AuditTable,
+		[parameter(Mandatory=$false, ParameterSetName = "Default")]
+		[alias("lc")]
+		[boolean]
+		$LocalComputer = $true,
+		[parameter(Mandatory=$false, ParameterSetName = "Default")]
+		[alias("rcn")]
+		[string]
+		$RemoteComputerName = "",
+		[parameter(Mandatory=$false, ParameterSetName = "Default")]
+		[alias("dbgl")]
+		[int]
+		$DBGLevel = 0)		
+BEGIN {}
+PROCESS
+{		
+	# Get and store the function Name.
+	$fn = GetFunctionName
+	$msg = ""
+	try
+	{		
+		# Enter routine.	
+		
+		$result = $true
+				
+	}
+	catch
+	{
+		# Return the error message.
+		$msg = "A problem occurred during the processing of the validation check."					
+		Write-PISysAudit_LogMessage $msg "Error" $fn -eo $_									
+		$result = "N/A"
+	}
+	
+	# Define the results in the audit table	
+	$AuditTable = New-PISysAuditObject -lc $LocalComputer -rcn $RemoteComputerName `
+										-at $AuditTable "AU20011" `
+										-ain "My Validation" -aiv $result `
+										-msg $msg `
+										-Group1 "PI System" -Group2 "PI Data Archive" `
+										-Severity "moderate"								
+}
+
+END {}
+
+#***************************
+#End of exported function
+#***************************
+}
+
+
+
 # ........................................................................
 # Add your cmdlet after this section. Don't forget to add an intruction
 # to export them at the bottom of this script.
@@ -1220,6 +1287,7 @@ Export-ModuleMember Get-PISysAudit_CheckExpensiveQueryProtection
 Export-ModuleMember Get-PISysAudit_CheckExplicitLoginDisabled
 Export-ModuleMember Get-PISysAudit_CheckPIAdminUsage
 Export-ModuleMember Get-PISysAudit_CheckPISPN
+Export-ModuleMember Get-PISysAudit_MyValidation
 # </Do not remove>
 
 # ........................................................................
