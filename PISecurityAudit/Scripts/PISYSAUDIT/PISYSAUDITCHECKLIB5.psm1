@@ -122,7 +122,7 @@ PROCESS
 	# Define the results in the audit table.
 	$AuditTable = New-PISysAuditObject -lc $LocalComputer -rcn $RemoteComputerName `
 									-at $AuditTable "AU50001" `
-									-msg $msg `
+									-aif $fn -msg $msg `
 									-ain "PI Coresight Version" -aiv $result `
 									-Group1 "PI System" -Group2 "PI Coresight" `
 									-Severity "Moderate"																																																
@@ -268,7 +268,7 @@ PROCESS
 	# Define the results in the audit table	
 	$AuditTable = New-PISysAuditObject -lc $LocalComputer -rcn $RemoteComputerName `
 									-at $AuditTable "AU50002" `
-									-msg $msg `
+									-aif $fn -msg $msg `
 									-ain "PI Coresight AppPool Check" -aiv $result `
 									-Group1 "PI System" -Group2 "PI Coresight" `
 									-Severity "Moderate"																																																
@@ -504,7 +504,7 @@ PROCESS
 	# Define the results in the audit table	
 	$AuditTable = New-PISysAuditObject -lc $LocalComputer -rcn $RemoteComputerName `
 									-at $AuditTable "AU50003" `
-									-msg $msg `
+									-aif $fn -msg $msg `
 									-ain "PI Coresight SSL Check" -aiv $result `
 									-Group1 "PI System" -Group2 "PI Coresight" `
 									-Severity $severity																																															
@@ -607,14 +607,22 @@ PROCESS
 		
 		$result = Invoke-PISysAudit_SPN -svctype $serviceType -svcname $serviceName -lc $LocalComputer -rcn $RemoteComputerName -appPool $csappPool -CustomHeader $CSheader -dbgl $DBGLevel
 
-		If ($result) 
-		{ 
-			$msg = "The Service Principal Name exists and it is assigned to the correct Service Account."
-		} 
-		Else 
-		{ 			
-			$msg = "The Service Principal Name does NOT exist or is NOT assigned to the correct Service Account."
-		}				
+		if($null -eq $result)
+		{
+			$msg = "Processing failed to parse setspn utility output."
+			$result = "N/A"
+		}
+		Else
+		{
+			If ($result) 
+			{ 
+				$msg = "The Service Principal Name exists and it is assigned to the correct Service Account."
+			} 
+			Else 
+			{ 			
+				$msg = "The Service Principal Name does NOT exist or is NOT assigned to the correct Service Account."
+			}	
+		}			
 	}
 	catch
 	{
@@ -627,7 +635,7 @@ PROCESS
 	# Define the results in the audit table	
 	$AuditTable = New-PISysAuditObject -lc $LocalComputer -rcn $RemoteComputerName `
 									-at $AuditTable "AU50004" `
-									-msg $msg `
+									-aif $fn -msg $msg `
 									-ain "PI Coresight SPN Check" -aiv $result `
 									-Group1 "PI System" -Group2 "PI Coresight" `
 									-Severity "Moderate"																																																
@@ -694,7 +702,7 @@ PROCESS
 	$AuditTable = New-PISysAuditObject -lc $LocalComputer -rcn $RemoteComputerName `
 									-at $AuditTable "AU1xxxx" `
 									-ain "<Name>" -aiv $result `
-									-msg $msg `
+									-aif $fn -msg $msg `
 									-Group1 "<Category 1>" -Group2 "<Category 2>" `
 									-Group3 "<Category 3>" -Group4 "<Category 4>" `
 									-Severity "<Severity>"																																																

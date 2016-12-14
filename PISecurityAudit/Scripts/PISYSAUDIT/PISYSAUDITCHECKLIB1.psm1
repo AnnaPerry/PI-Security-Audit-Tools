@@ -48,7 +48,7 @@ Get functions from machine library.
 	# the machine compliance.
 	[System.Collections.HashTable]$listOfFunctions = @{}	
 	$listOfFunctions.Add("Get-PISysAudit_CheckDomainMemberShip", 1)
-	$listOfFunctions.Add("Get-PISysAudit_CheckOSSKU", 1)
+	$listOfFunctions.Add("Get-PISysAudit_CheckOSInstallationType", 1)
 	$listOfFunctions.Add("Get-PISysAudit_CheckFirewallEnabled", 1)
 	$listOfFunctions.Add("Get-PISysAudit_CheckAppLockerEnabled", 1)
 	$listOfFunctions.Add("Get-PISysAudit_CheckUACEnabled", 1)
@@ -126,7 +126,7 @@ PROCESS
 	$AuditTable = New-PISysAuditObject -lc $LocalComputer -rcn $RemoteComputerName `
 										-at $AuditTable "AU10001" `
 										-ain "Domain Membership Check" -aiv $result `
-										-msg $msg `
+										-aif $fn -msg $msg `
 										-Group1 "Machine" -Group2 "Domain" `
 										-Severity "Severe"																				 
 }
@@ -138,20 +138,18 @@ END {}
 #***************************
 }
 
-function Get-PISysAudit_CheckOSSKU
+function Get-PISysAudit_CheckOSInstallationType
 {
 <#  
 .SYNOPSIS
-AU10002 - Operating System SKU
+AU10002 - Operating System Installation Type
 .DESCRIPTION   
-VALIDATION: verifies that the OS Stock Keeping Unit (SKU) is appropriate for 
-production use.<br/>
-COMPLIANCE: SKU should match one of the following: 12, 13, 14, 29, 39, 40, 41 or 42.
-All SKU values are viewable here: <br/>
+VALIDATION: verifies that the OS installation type is server core for the 
+reduced surface area.<br/>
+COMPLIANCE: Installation Type should be Server Core. Different SKUs are
+available at the link below:<br/>
 <a href="http://msdn.microsoft.com/en-us/library/ms724358.aspx">http://msdn.microsoft.com/en-us/library/ms724358.aspx</a><br/>  
-These SKUs were chosen to highlight the reduced attack surface area of a core 
-installation of Windows Server.  For more on the advantages of Windows Server Core, 
-please see:<br/>
+For more on the advantages of Windows Server Core, please see:<br/>
 <a href="https://msdn.microsoft.com/en-us/library/hh846314(v=vs.85).aspx">https://msdn.microsoft.com/en-us/library/hh846314(v=vs.85).aspx </a>
 #>
 [CmdletBinding(DefaultParameterSetName="Default", SupportsShouldProcess=$false)]     
@@ -180,100 +178,14 @@ PROCESS
 	$msg = ""
 	try
 	{				
-		# Get the value from the WMI Query
-		$sku = Get-PISysAudit_OSSKU -lc $LocalComputer -rcn $RemoteComputerName -dbgl $DBGLevel
-		$productTranscription = ""
-		# This link (http://msdn.microsoft.com/en-us/library/ms724358.aspx) contains all the possible sku.
-		switch ($sku)
-		{
-			0   { $productTranscription = "An unknown product"; break; }
-			1   { $productTranscription = "Ultimate"; break; }
-			2   { $productTranscription = "Home Basic"; break; }
-			3   { $productTranscription = "Home Premium"; break; }
-			4   { $productTranscription = "Enterprise"; break; }
-			5   { $productTranscription = "Home Basic N"; break; }
-			6   { $productTranscription = "Business"; break; }
-			7   { $productTranscription = "Server Standard"; break; }
-			8   { $productTranscription = "Server Datacenter (full installation)"; break; }
-			9   { $productTranscription = "Windows Small Business Server"; break; }
-			10  { $productTranscription = "Server Enterprise (full installation)"; break; }
-			11  { $productTranscription = "Starter"; break; }
-			12  { $productTranscription = "Server Datacenter (core installation)"; break; }
-			13  { $productTranscription = "Server Standard (core installation)"; break; }
-			14  { $productTranscription = "Server Enterprise (core installation)"; break; }
-			15  { $productTranscription = "Server Enterprise for Itanium-based Systems"; break; }
-			16  { $productTranscription = "Business N"; break; }
-			17  { $productTranscription = "Web Server (full installation)"; break; }
-			18  { $productTranscription = "HPC Edition"; break; }
-			19  { $productTranscription = "Windows Storage Server 2008 R2 Essentials"; break; }
-			20  { $productTranscription = "Storage Server Express"; break; }
-			21  { $productTranscription = "Storage Server Standard"; break; }
-			22  { $productTranscription = "Storage Server Workgroup"; break; }
-			23  { $productTranscription = "Storage Server Enterprise"; break; }
-			24  { $productTranscription = "Windows Server 2008 for Windows Essential Server Solutions"; break; }
-			25  { $productTranscription = "Small Business Server Premium"; break; }
-			26  { $productTranscription = "Home Premium N"; break; }
-			27  { $productTranscription = "Enterprise N"; break; }
-			28  { $productTranscription = "Ultimate N"; break; }
-			29  { $productTranscription = "Web Server (core installation)"; break; }
-			30  { $productTranscription = "Windows Essential Business Server Management Server"; break; }
-			31  { $productTranscription = "Windows Essential Business Server Security Server"; break; }
-			32  { $productTranscription = "Windows Essential Business Server Messaging Server"; break; }
-			33  { $productTranscription = "Server Foundation"; break; }
-			34  { $productTranscription = "Windows Home Server 2011"; break; }
-			35  { $productTranscription = "Windows Server 2008 without Hyper-V for Windows Essential Server
-				   Solutions"; break; }
-			36  { $productTranscription = "Server Standard without Hyper-V"; break; }
-			37  { $productTranscription = "Server Datacenter without Hyper-V (full installation)"; break; }
-			38  { $productTranscription = "Server Enterprise without Hyper-V (full installation)"; break; }
-			39  { $productTranscription = "Server Datacenter without Hyper-V (core installation)"; break; }
-			40  { $productTranscription = "Server Standard without Hyper-V (core installation)"; break; }
-			41  { $productTranscription = "Server Enterprise without Hyper-V (core installation)"; break; }
-			42  { $productTranscription = "Microsoft Hyper-V Server"; break; }
-			43  { $productTranscription = "Storage Server Express (core installation)"; break; }
-			44  { $productTranscription = "Storage Server Standard (core installation)"; break; }
-			45  { $productTranscription = "Storage Server Workgroup (core installation)"; break; }
-			46  { $productTranscription = "Storage Server Enterprise (core installation)"; break; }
-			46  { $productTranscription = "Storage Server Enterprise (core installation)"; break; }
-			47  { $productTranscription = "Starter N"; break; }
-			48  { $productTranscription = "Professional"; break; }
-			49  { $productTranscription = "Professional N"; break; }
-			50  { $productTranscription = "Windows Small Business Server 2011 Essentials"; break; }
-			51  { $productTranscription = "Server For SB Solutions"; break; }
-			52  { $productTranscription = "Server Solutions Premium"; break; }
-			53  { $productTranscription = "Server Solutions Premium (core installation)"; break; }
-			54  { $productTranscription = "Server For SB Solutions EM"; break; }
-			55  { $productTranscription = "Server For SB Solutions EM"; break; }
-			56  { $productTranscription = "Windows MultiPoint Server"; break; }
-			59  { $productTranscription = "Windows Essential Server Solution Management"; break; }
-			60  { $productTranscription = "Windows Essential Server Solution Additional"; break; }
-			61  { $productTranscription = "Windows Essential Server Solution Management SVC"; break; }
-			62  { $productTranscription = "Windows Essential Server Solution Additional SVC"; break; }
-			63  { $productTranscription = "Small Business Server Premium (core installation)"; break; }
-			64  { $productTranscription = "Server Hyper Core V"; break; }
-			72  { $productTranscription = "Server Enterprise (evaluation installation)"; break; }
-			76  { $productTranscription = "Windows MultiPoint Server Standard (full installation)"; break; }
-			77  { $productTranscription = "Windows MultiPoint Server Premium (full installation)"; break; }
-			79  { $productTranscription = "Server Standard (evaluation installation)"; break; }
-			80  { $productTranscription = "Server Datacenter (evaluation installation)"; break; }
-			84  { $productTranscription = "Enterprise N (evaluation installation)"; break; }
-			95  { $productTranscription = "Storage Server Workgroup (evaluation installation)"; break; }
-			96  { $productTranscription = "Storage Server Standard (evaluation installation)"; break; }
-			98  { $productTranscription = "Windows 8 N"; break; }
-			99  { $productTranscription = "Windows 8 China"; break; }
-			100 { $productTranscription = "Windows 8 Single Language"; break; }
-			101 { $productTranscription = "Windows 8"; break; }
-			103 { $productTranscription = "Professional with Media Center"; break; }
-
-			default {$productTranscription = "Unknown: " + $sku }
-		}
+		$InstallationType = Get-PISysAudit_RegistryKeyValue "HKLM:\Software\Microsoft\Windows NT\CurrentVersion" "InstallationType" -lc $LocalComputer -rcn $RemoteComputerName -dbgl $DBGLevel
 
 		# Check if the value is from one in the list			
-		if($sku -match "12|13|14|29|39|40|41|42") { $result =  $true } else { $result = $false }
+		if($InstallationType -eq "Server Core") { $result =  $true } else { $result = $false }
 
 		# Set a message to return with the audit object.
-		$msgTemplate = "The following product is used: {0}"
-		$msg = [string]::Format($msgTemplate, $productTranscription)
+		$msgTemplate = "The following installation type is used: {0}"
+		$msg = [string]::Format($msgTemplate, $InstallationType)
 
 	}
 	catch
@@ -287,8 +199,8 @@ PROCESS
 	# Define the results in the audit table													
 	$AuditTable = New-PISysAuditObject -lc $LocalComputer -rcn $RemoteComputerName `
 										-at $AuditTable "AU10002" `
-										-ain "Operating System SKU" -aiv $result `
-										-msg $msg `
+										-ain "Operating System Installation Type" -aiv $result `
+										-aif $fn -msg $msg `
 										-Group1 "Machine" -Group2 "Operating System" `
 										-Severity "Severe"													
 }
@@ -380,7 +292,7 @@ PROCESS
 	$AuditTable = New-PISysAuditObject -lc $LocalComputer -rcn $RemoteComputerName `
 										-at $AuditTable "AU10003" `
 										-ain "Firewall Enabled" -aiv $result `
-										-msg $msg `
+										-aif $fn -msg $msg `
 										-Group1 "Machine" -Group2 "Policy" `
 										-Severity "Moderate"																				 
 }
@@ -462,7 +374,7 @@ PROCESS
 	$AuditTable = New-PISysAuditObject -lc $LocalComputer -rcn $RemoteComputerName `
 										-at $AuditTable "AU10004" `
 										-ain "AppLocker Enabled" -aiv $result `
-										-msg $msg `
+										-aif $fn -msg $msg `
 										-Group1 "Machine" -Group2 "Policy" `
 										-Severity "Moderate"																				 
 }
@@ -561,7 +473,7 @@ PROCESS
 	$AuditTable = New-PISysAuditObject -lc $LocalComputer -rcn $RemoteComputerName `
 										-at $AuditTable "AU10005" `
 										-ain "UAC Enabled" -aiv $result `
-										-msg $msg `
+										-aif $fn -msg $msg `
 										-Group1 "Machine" -Group2 "Policy" `
 										-Severity $severity																				 
 }
@@ -626,7 +538,7 @@ PROCESS
 	$AuditTable = New-PISysAuditObject -lc $LocalComputer -rcn $RemoteComputerName `
 									-at $AuditTable "AU1xxxx" `
 									-ain "<Name>" -aiv $result `
-									-msg $msg `
+									-aif $fn -msg $msg `
 									-Group1 "<Category 1>" -Group2 "<Category 2>" `
 									-Group3 "<Category 3>" -Group4 "<Category 4>" `
 									-Severity "<Severity>"																																																
@@ -645,7 +557,7 @@ END {}
 # <Do not remove>
 Export-ModuleMember Get-PISysAudit_FunctionsFromLibrary1
 Export-ModuleMember Get-PISysAudit_CheckDomainMemberShip
-Export-ModuleMember Get-PISysAudit_CheckOSSKU
+Export-ModuleMember Get-PISysAudit_CheckOSInstallationType
 Export-ModuleMember Get-PISysAudit_CheckFirewallEnabled
 Export-ModuleMember Get-PISysAudit_CheckAppLockerEnabled
 Export-ModuleMember Get-PISysAudit_CheckUACEnabled

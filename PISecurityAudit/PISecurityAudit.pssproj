@@ -29,6 +29,7 @@
   <ItemGroup>
     <Folder Include="en-US\" />
     <Folder Include="Scripts\" />
+    <Folder Include="Scripts\Utilities\" />
     <Folder Include="Scripts\piconfig\" />
     <Folder Include="Scripts\PISYSAUDIT\" />
   </ItemGroup>
@@ -46,6 +47,8 @@
     <Compile Include="Scripts\PISYSAUDIT\PISYSAUDITCHECKLIB5.psm1" />
     <Compile Include="Scripts\PISYSAUDIT\PISYSAUDITCORE.psm1" />
     <Compile Include="Scripts\UpdateValidationsInHelp.ps1" />
+    <Compile Include="Scripts\Utilities\CoresightKerberosConfiguration.psm1" />
+    <Compile Include="Scripts\Utilities\PISECCONFIGEXPORT.psm1" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="en-US\about_PISYSAUDIT.help.txt" />

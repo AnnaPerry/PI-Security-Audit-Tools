@@ -124,7 +124,7 @@ PROCESS
 	# Define the results in the audit table		
 	$AuditTable = New-PISysAuditObject -lc $LocalComputer -rcn $RemoteComputerName `
 										-at $AuditTable "AU30001" `
-										-msg $msg `
+										-aif $fn -msg $msg `
 										-ain "Configured Account" -aiv $result `
 										-Group1 "PI System" -Group2 "PI AF Server" `
 										-Severity "Severe"
@@ -179,44 +179,54 @@ PROCESS
 		# Invoke the afdiag.exe command.		
 		$outputFileContent = Invoke-PISysAudit_AFDiagCommand -lc $LocalComputer -rcn $RemoteComputerName -dbgl $DBGLevel -oper "Read"
 		
-		#.................................
-		# Validate rules
-		# (Do not remove)
-		#.................................
-		# Example of output.
-		# SQL Connection String: 'Persist Security Info=False;Integrated
-		# Security=SSPI;server=PISYSTEM2;database=PIFD;Application Name=AF
-		# Application Server;'
-
-		# System Name = PISYSTEM2
-		# SystemID = 6a5c9048-38c7-40fb-a65f-bcaf729580c5
-		# Database Settings:
-		# ...
-		# Configuration Settings:
-		# 	Audit Trail = Disabled
-		# 	EnableExternalDataTables = True
-		# 	ExternalDataTablesAllowNonImpersonatedUsers = False
-		# 	EnableExternalDataTablesWithAF20 = False
-		# 	EnableSandbox = True
-		# 	EnablePropagateElementDeletesToAnalysisandNotification = True
-		# 	EnableEventFrames = True
-		
-		# Read each line to find the one containing the token to replace.
-		# Check if the value is false = compliant, true it is not compliant
-		$result = $true
-		foreach($line in $outputFileContent)
-		{								
-			if($line.ToLower().Contains("externaldatatablesallownonimpersonatedusers"))
-			{								
-				if($line.ToLower().Contains("true")) 
-				{ 
-					$result = $false
-					$msg = "Non Impersonated Users are allowed for external tables." 
-				}
-				break
-			}						
+		# Verify that we can read AF Diag output.
+		if($null -eq $outputFileContent)
+		{
+			$msg = "AFDiag output not found.  Cannot continue processing the validation check"
+			Write-PISysAudit_LogMessage $msg "Warning" $fn
+			$result = "N/A"
 		}
-		if($result){$msg = "Non Impersonated Users are not allowed for external tables."}				
+		else
+		{
+			#.................................
+			# Validate rules
+			# (Do not remove)
+			#.................................
+			# Example of output.
+			# SQL Connection String: 'Persist Security Info=False;Integrated
+			# Security=SSPI;server=PISYSTEM2;database=PIFD;Application Name=AF
+			# Application Server;'
+
+			# System Name = PISYSTEM2
+			# SystemID = 6a5c9048-38c7-40fb-a65f-bcaf729580c5
+			# Database Settings:
+			# ...
+			# Configuration Settings:
+			# 	Audit Trail = Disabled
+			# 	EnableExternalDataTables = True
+			# 	ExternalDataTablesAllowNonImpersonatedUsers = False
+			# 	EnableExternalDataTablesWithAF20 = False
+			# 	EnableSandbox = True
+			# 	EnablePropagateElementDeletesToAnalysisandNotification = True
+			# 	EnableEventFrames = True
+		
+			# Read each line to find the one containing the token to replace.
+			# Check if the value is false = compliant, true it is not compliant
+			$result = $true
+			foreach($line in $outputFileContent)
+			{								
+				if($line.ToLower().Contains("externaldatatablesallownonimpersonatedusers"))
+				{								
+					if($line.ToLower().Contains("true")) 
+					{ 
+						$result = $false
+						$msg = "Non Impersonated Users are allowed for external tables." 
+					}
+					break
+				}						
+			}
+			if($result){$msg = "Non Impersonated Users are not allowed for external tables."}	
+		}			
 	}
 	catch
 	{
@@ -230,7 +240,7 @@ PROCESS
 	$AuditTable = New-PISysAuditObject -lc $LocalComputer -rcn $RemoteComputerName `
 										-at $AuditTable "AU30002" `
 										-ain "Impersonation mode for AF Data Sets" -aiv $result `
-										-msg $msg `
+										-aif $fn -msg $msg `
 										-Group1 "PI System" -Group2 "PI AF Server" `
 										-Severity "Low"
 										
@@ -282,59 +292,70 @@ PROCESS
 	$msg = ""
 	try
 	{										
-		# Initialize objects.
-		$securityWeaknessCounter = 0	
-		$securityWeakness = $false
-		$privilegeFound = $false		
-		
-		# Get the service account.
-		$listOfPrivileges = Get-PISysAudit_CheckPrivilege -lc $LocalComputer -rcn $RemoteComputerName -priv "All" -sn "AFService" -dbgl $DBGLevel					
-		
-		# Read each line to find granted privileges.		
-		foreach($line in $listOfPrivileges)
-		{											
-			# Reset.
-			$securityWeakness = $false						
-			$privilegeFound = $false			
-			
-			# Skip any line not starting with 'SE'
-			if($line.ToUpper().StartsWith("SE")) 
-			{								
-				# Validate that the tokens contains these privileges.
-				if($line.ToUpper().Contains("SEDEBUGPRIVILEGE")) { $privilegeFound = $true }
-				if($line.ToUpper().Contains("SETAKEOWNERSHIPPRIVILEGE")) { $privilegeFound = $true }
-				if($line.ToUpper().Contains("SETCBPRIVILEGE")) { $privilegeFound = $true }
-				
-				# Validate that the privilege is enabled, if yes a weakness was found.
-				if($privilegeFound -and ($line.ToUpper().Contains("ENABLED"))) { $securityWeakness = $true }
-			}							
-
-			# Increment the counter if a weakness has been discovered.
-			if($securityWeakness)
-			{
-				$securityWeaknessCounter++
-				
-				# Store the privilege found that might compromise security.
-				if($securityWeaknessCounter -eq 1)
-				{ $msg = $line.ToUpper() }
-				else
-				{ $msg = $msg + ", " + $line.ToUpper() }
-			}					
-		}
-		
-		# Check if the counter is 0 = compliant, 1 or more it is not compliant		
-		if($securityWeaknessCounter -gt 0)
+		$IsElevated = (Get-Variable "PISysAuditIsElevated" -Scope "Global" -ErrorAction "SilentlyContinue").Value
+		# Verify running elevated.
+		if(-not($IsElevated))
 		{
-			$result = $false
-			if($securityWeaknessCounter -eq 1)
-			{ $msg = "The following privilege: " + $msg + " is enabled." }
-			else
-			{ $msg = "The following privileges: " + $msg + " are enabled." }
+			$msg = "Elevation required to check process privilege.  Run Powershell as Administrator to complete these checks"
+			Write-PISysAudit_LogMessage $msg "Warning" $fn
+			$result = "N/A"
 		}
-		else 
-		{ 
-			$result = $true 
-			$msg = "No weaknesses were detected."
+		else
+		{
+			# Initialize objects.
+			$securityWeaknessCounter = 0	
+			$securityWeakness = $false
+			$privilegeFound = $false		
+		
+			# Get the service account.
+			$listOfPrivileges = Get-PISysAudit_CheckPrivilege -lc $LocalComputer -rcn $RemoteComputerName -priv "All" -sn "AFService" -dbgl $DBGLevel					
+		
+			# Read each line to find granted privileges.		
+			foreach($line in $listOfPrivileges)
+			{											
+				# Reset.
+				$securityWeakness = $false						
+				$privilegeFound = $false			
+			
+				# Skip any line not starting with 'SE'
+				if($line.ToUpper().StartsWith("SE")) 
+				{								
+					# Validate that the tokens contains these privileges.
+					if($line.ToUpper().Contains("SEDEBUGPRIVILEGE")) { $privilegeFound = $true }
+					if($line.ToUpper().Contains("SETAKEOWNERSHIPPRIVILEGE")) { $privilegeFound = $true }
+					if($line.ToUpper().Contains("SETCBPRIVILEGE")) { $privilegeFound = $true }
+				
+					# Validate that the privilege is enabled, if yes a weakness was found.
+					if($privilegeFound -and ($line.ToUpper().Contains("ENABLED"))) { $securityWeakness = $true }
+				}							
+
+				# Increment the counter if a weakness has been discovered.
+				if($securityWeakness)
+				{
+					$securityWeaknessCounter++
+				
+					# Store the privilege found that might compromise security.
+					if($securityWeaknessCounter -eq 1)
+					{ $msg = $line.ToUpper() }
+					else
+					{ $msg = $msg + ", " + $line.ToUpper() }
+				}					
+			}
+		
+			# Check if the counter is 0 = compliant, 1 or more it is not compliant		
+			if($securityWeaknessCounter -gt 0)
+			{
+				$result = $false
+				if($securityWeaknessCounter -eq 1)
+				{ $msg = "The following privilege: " + $msg + " is enabled." }
+				else
+				{ $msg = "The following privileges: " + $msg + " are enabled." }
+			}
+			else 
+			{ 
+				$result = $true 
+				$msg = "No weaknesses were detected."
+			}
 		}
 	}
 	catch
@@ -349,7 +370,7 @@ PROCESS
 	$AuditTable = New-PISysAuditObject -lc $LocalComputer -rcn $RemoteComputerName `
 										-at $AuditTable "AU30003" `
 										-ain "PI AF Server Service privileges" -aiv $result `
-										-msg $msg `
+										-aif $fn -msg $msg `
 										-Group1 "PI System" -Group2 "PI AF Server" `
 										-Severity "Severe"																					
 }
@@ -402,21 +423,31 @@ PROCESS
 		# Read the afdiag.exe command output.
 		$outputFileContent = Invoke-PISysAudit_AFDiagCommand -lc $LocalComputer -rcn $RemoteComputerName -dbgl $DBGLevel -oper "Read"
 
-		# Read each line to find the one containing the token to replace.
-		$result = $true
-		foreach($line in $outputFileContent)
-		{								
-			if($line.ToLower().Contains("pluginverifylevel"))
+		# Verify that we can read AF Diag output.
+		if($null -eq $outputFileContent)
+		{
+			$msg = "AFDiag output not found.  Cannot continue processing the validation check"
+			Write-PISysAudit_LogMessage $msg "Warning" $fn
+			$result = "N/A"
+		}
+		else
+		{
+			# Read each line to find the one containing the token to replace.
+			$result = $true
+			foreach($line in $outputFileContent)
 			{								
-				if($line.ToLower().Contains("allowunsigned") -or $line.ToLower().Contains("none")) 
-				{ 
-					$result = $false 
-					$msg = "Unsigned plugins are permitted."
-				}
-				break
-			}						
-		}	
-		if($result){$msg = "Signatures are required for plugins."}			
+				if($line.ToLower().Contains("pluginverifylevel"))
+				{								
+					if($line.ToLower().Contains("allowunsigned") -or $line.ToLower().Contains("none")) 
+					{ 
+						$result = $false 
+						$msg = "Unsigned plugins are permitted."
+					}
+					break
+				}						
+			}	
+			if($result){$msg = "Signatures are required for plugins."}	
+		}		
 	}
 	catch
 	{
@@ -430,7 +461,7 @@ PROCESS
 	$AuditTable = New-PISysAuditObject -lc $LocalComputer -rcn $RemoteComputerName `
 										-at $AuditTable "AU30004" `
 										-ain "PI AF Server Plugin Verify Level" -aiv $result `
-										-msg $msg `
+										-aif $fn -msg $msg `
 										-Group1 "PI System" -Group2 "PI AF Server" `
 										-Severity "Moderate"
 										
@@ -487,48 +518,58 @@ PROCESS
 
 		# Read each line to find the one containing the token to replace.
 		$result = $true
-		foreach($line in $outputFileContent)
-		{								
-			# Locate FileExtensions parameter
-			if($line.ToLower().Contains("fileextensions"))
+		
+		if($null -eq $outputFileContent)
+		{
+			$msg = "AFDiag output not found.  Cannot continue processing the validation check"
+			Write-PISysAudit_LogMessage $msg "Warning" $fn
+			$result = "N/A"
+		}
+		else
+		{
+			foreach($line in $outputFileContent)
 			{								
-				# Master whitelist of approved extensions
-				[System.Collections.ArrayList] $allowedExtensions = 'docx','xlsx','csv','pdf','txt','rtf','jpg','jpeg','png','svg','tiff','gif'
-				# Extract configured whitelist from parameter value
-				[string] $extensionList = $line.Split('=')[1].Trim()
-				if($extensionList -ne "")
-				{
-					[string[]] $extensions = $extensionList.Split(':')
-					# Loop through the configured extensions
-					foreach($extension in $extensions) 
-					{ 
-						# Assume extension is a violation until proven compliant
-						$result = $false
-						# As soon as the extension is found in the master list, we move to the next one
-						foreach($allowedExtension in $allowedExtensions)
-						{
-							if($extension -eq $allowedExtension) 
-							{ 
-								$result = $true
-								# There should not be duplicates so we don't need include that extension in further iterations
-								$allowedExtensions.Remove($extension)
+				# Locate FileExtensions parameter
+				if($line.ToLower().Contains("fileextensions"))
+				{								
+					# Master whitelist of approved extensions
+					[System.Collections.ArrayList] $allowedExtensions = 'docx','xlsx','csv','pdf','txt','rtf','jpg','jpeg','png','svg','tiff','gif'
+					# Extract configured whitelist from parameter value
+					[string] $extensionList = $line.Split('=')[1].Trim()
+					if($extensionList -ne "")
+					{
+						[string[]] $extensions = $extensionList.Split(':')
+						# Loop through the configured extensions
+						foreach($extension in $extensions) 
+						{ 
+							# Assume extension is a violation until proven compliant
+							$result = $false
+							# As soon as the extension is found in the master list, we move to the next one
+							foreach($allowedExtension in $allowedExtensions)
+							{
+								if($extension -eq $allowedExtension) 
+								{ 
+									$result = $true
+									# There should not be duplicates so we don't need include that extension in further iterations
+									$allowedExtensions.Remove($extension)
+									break
+								}
+								else {$result = $false}
+							}
+							# If we detect any rogue extension, the validation check fails, no need to look further
+							if($result -eq $false) 
+							{
+								$msg = "Setting contains non-compliant extenions."
 								break
 							}
-							else {$result = $false}
-						}
-						# If we detect any rogue extension, the validation check fails, no need to look further
-						if($result -eq $false) 
-						{
-							$msg = "Setting contains non-compliant extenions."
-							break
-						}
-					} 
-					if($result){$msg = "No non-compliant extensions identified."}
+						} 
+						if($result){$msg = "No non-compliant extensions identified."}
+						break
+					}
 					break
-				}
-				break
-			}						
-		}				
+				}						
+			}	
+		}			
 	}
 	catch
 	{
@@ -542,7 +583,7 @@ PROCESS
 	$AuditTable = New-PISysAuditObject -lc $LocalComputer -rcn $RemoteComputerName `
 										-at $AuditTable "AU30005" `
 										-ain "PI AF Server File Extension Whitelist" -aiv $result `
-										-msg $msg `
+										-aif $fn -msg $msg `
 										-Group1 "PI System" -Group2 "PI AF Server" `
 										-Severity "Moderate"
 										
@@ -590,35 +631,63 @@ PROCESS
 	# Get and store the function Name.
 	$fn = GetFunctionName
 	$msg = ""
+	$installVersion = $null
 	try
 	{						
-		# Read the afdiag.exe command output.
-		$outputFileContent = Invoke-PISysAudit_AFDiagCommand -lc $LocalComputer -rcn $RemoteComputerName -dbgl $DBGLevel -oper "Read"
-
-		# Read each line to find the one containing the token to replace.
-		foreach($line in $outputFileContent)
-		{								
-			if($line.Contains("Version"))
-			{								
-				$installVersion = $line.Split('=')[1].Trim()
-				$installVersionTokens = $installVersion.Split(".")
-				# Form an integer value with all the version tokens.
-				[string]$temp = $InstallVersionTokens[0] + $installVersionTokens[1] + $installVersionTokens[2] + $installVersionTokens[3]
-				$installVersionInt64 = [Convert]::ToInt64($temp)
-				if($installVersionInt64 -gt 2800000)
-				{
-					$result = $true
-					$msg = "Server version is compliant."
+		# Get install version via PowerShell, fall back to AFDiag
+		if($global:ArePowerShellToolsAvailable)
+		{
+			$installVersion = $global:AFServerConnection.ServerVersion
+		}
+		else
+		{
+			# Read the afdiag.exe command output.
+			$outputFileContent = Invoke-PISysAudit_AFDiagCommand -lc $LocalComputer -rcn $RemoteComputerName -dbgl $DBGLevel -oper "Read"
+			# Verify that we can read AF Diag output.
+			if($null -eq $outputFileContent)
+			{
+				$msg = "AFDiag output not found.  Cannot continue processing the validation check"
+				Write-PISysAudit_LogMessage $msg "Warning" $fn
+				$result = "N/A"
+			}
+			else
+			{
+				# Read each line to find the one containing the token to replace.
+				foreach($line in $outputFileContent)
+				{								
+					if($line.Contains("Version"))
+					{								
+						$installVersion = $line.Split('=')[1].Trim()
+						break
+					}						
 				}
-				else
-				{
-					$result = $false
-					$msg = "Server version is non-compliant: {0}."
-					$msg = [string]::Format($msg, $installVersion)
-				}
-				break
-			}						
-		}				
+			}	
+		}
+		# Perform logic on install version
+		if($null -ne $installVersion)
+		{
+			$installVersionTokens = $installVersion.Split(".")
+			# Form an integer value with all the version tokens.
+			[string]$temp = $InstallVersionTokens[0] + $installVersionTokens[1] + $installVersionTokens[2] + $installVersionTokens[3]
+			$installVersionInt64 = [Convert]::ToInt64($temp)
+			if($installVersionInt64 -gt 2850000)
+			{
+				$result = $true
+				$msg = "Server version is compliant."
+			}
+			else
+			{
+				$result = $false
+				$msg = "Server version is non-compliant: {0}."
+				$msg = [string]::Format($msg, $installVersion)
+			}		
+		}
+		else
+		{
+			$msg = "AF version not found.  Cannot continue processing the validation check"
+			Write-PISysAudit_LogMessage $msg "Warning" $fn
+			$result = "N/A"
+		}	
 	}
 	catch
 	{
@@ -632,7 +701,7 @@ PROCESS
 	$AuditTable = New-PISysAuditObject -lc $LocalComputer -rcn $RemoteComputerName `
 										-at $AuditTable "AU30006" `
 										-ain "PI AF Server Version" -aiv $result `
-										-msg $msg `
+										-aif $fn -msg $msg `
 										-Group1 "PI System" -Group2 "PI AF Server" `
 										-Severity "Moderate"
 										
@@ -709,7 +778,7 @@ PROCESS
 	$AuditTable = New-PISysAuditObject -lc $LocalComputer -rcn $RemoteComputerName `
 										-at $AuditTable "AU30007" `
 										-ain "PI AF Server SPN Check" -aiv $result `
-										-msg $msg `
+										-aif $fn -msg $msg `
 										-Group1 "PI System" -Group2 "PI AF Server"`
 										-Severity "Moderate"
 }
@@ -774,7 +843,7 @@ PROCESS
 	$AuditTable = New-PISysAuditObject -lc $LocalComputer -rcn $RemoteComputerName `
 										-at $AuditTable "AU3xxxx" `
 										-ain "<Name>" -aiv $result `
-										-msg $msg `
+										-aif $fn -msg $msg `
 										-Group1 "<Category 1>" -Group2 "<Category 2>" -Group3 "<Category 3>" -Group4 "<Category 4>"`
 										-Severity "<Severity>"
 }

@@ -39,6 +39,7 @@
 #	PasswordPath
 #	PISysAuditInitialized
 #	PISysAuditCachedSecurePWD
+#   PISysAuditIsElevated
 # ........................................................................
 
 # ........................................................................
@@ -63,26 +64,32 @@ function SetFolders
 	$scriptsPath = Split-Path $modulePath
 	$rootPath = Split-Path $scriptsPath				
 	
-	$exportPath = Join-Path -Path $rootPath -ChildPath "Export"
+	$exportPath = PathConcat -ParentPath $rootPath -ChildPath "Export"
 	if (!(Test-Path $exportPath)){
 	New-Item $exportPath -type directory
 	}
-	$scriptsPathTemp = Join-Path -Path $scriptsPath -ChildPath "Temp"
+	$scriptsPathTemp = PathConcat -ParentPath $scriptsPath -ChildPath "Temp"
 	if (!(Test-Path $scriptsPathTemp)){
 	New-Item $scriptsPathTemp -type directory
 	}
 
-	$picnfgPath = Join-Path -Path $scriptsPath -ChildPath "piconfig"
-	$pwdPath = Join-Path -Path $rootPath -ChildPath "pwd"		
-	$logFile = Join-Path -Path $exportPath -ChildPath "PISystemAudit.log"		
+	$picnfgPath = PathConcat -ParentPath $scriptsPath -ChildPath "piconfig"
+	$pwdPath = PathConcat -ParentPath $rootPath -ChildPath "pwd"		
+	$logFile = PathConcat -ParentPath $exportPath -ChildPath "PISystemAudit.log"		
 
 	# Store them at within the global scope range.	
 	New-Variable -Name "ScriptsPath" -Option "Constant" -Scope "Global" -Visibility "Public" -Value $scriptsPath
 	New-Variable -Name "ScriptsPathTemp" -Option "Constant" -Scope "Global" -Visibility "Public" -Value $scriptsPathTemp			
 	New-Variable -Name "PasswordPath" -Option "Constant" -Scope "Global" -Visibility "Public" -Value $pwdPath
-	New-Variable -Name "ExportPath" -Option "Constant" -Scope "Global" -Visibility "Public" -Value $exportPath
+	if($null -eq (Get-Variable "ExportPath" -Scope "Global" -ErrorAction "SilentlyContinue").Value)
+	{
+		New-Variable -Name "ExportPath" -Option "Constant" -Scope "Global" -Visibility "Public" -Value $exportPath
+	}
 	New-Variable -Name "PIConfigScriptPath" -Option "Constant" -Scope "Global" -Visibility "Public" -Value $picnfgPath
-	New-Variable -Name "PISystemAuditLogFile" -Option "Constant" -Scope "Global" -Visibility "Public" -Value $logFile	
+	if($null -eq (Get-Variable "PISystemAuditLogFile" -Scope "Global" -ErrorAction "SilentlyContinue").Value)
+	{
+		New-Variable -Name "PISystemAuditLogFile" -Option "Constant" -Scope "Global" -Visibility "Public" -Value $logFile	
+	}
 }
 
 function NewObfuscateValue
@@ -248,7 +255,7 @@ param(
 			{							
 				if($cluFound -eq $false)
 				{
-					$PIConfigExec = Join-Path -Path $PIServer_path -ChildPath "adm\piconfig.exe"										
+					$PIConfigExec = PathConcat -ParentPath $PIServer_path -ChildPath "adm\piconfig.exe"										
 					if(Test-Path $PIConfigExec) { $cluFound = $true }
 				}
 				
@@ -263,7 +270,7 @@ param(
 			
 			if($cluFound -eq $false)
 			{
-				$PIConfigExec = Join-Path -Path $PIHome64_path -ChildPath "adm\piconfig.exe"
+				$PIConfigExec = PathConcat -ParentPath $PIHome64_path -ChildPath "adm\piconfig.exe"
 				if(Test-Path $PIConfigExec) { $cluFound = $true }
 				
 				# ............................................................................................................
@@ -277,7 +284,7 @@ param(
 			
 			if($cluFound -eq $false)
 			{
-				$PIConfigExec = Join-Path -Path $PIHome_path -ChildPath "adm\piconfig.exe"
+				$PIConfigExec = PathConcat -ParentPath $PIHome_path -ChildPath "adm\piconfig.exe"
 				if(Test-Path $PIConfigExec) { $cluFound = $true }
 					
 				# ............................................................................................................
@@ -310,6 +317,31 @@ param(
 		Write-PISysAudit_LogMessage $msg "Error" $fn -eo $_
 		return $false
 	}	
+}
+
+function CheckIfRunningElevated
+{
+[CmdletBinding(DefaultParameterSetName="Default", SupportsShouldProcess=$false)]
+param(
+		[parameter(Mandatory=$false, ParameterSetName = "Default")]
+		[alias("dbgl")]
+		[int]
+		$DBGLevel = 0)
+		
+	$fn = GetFunctionName		
+	
+	try
+	{
+		$windowsPrinciple = new-object System.Security.Principal.WindowsPrincipal([System.Security.Principal.WindowsIdentity]::GetCurrent())
+		return $windowsPrinciple.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)         
+	}
+	catch
+	{
+		# Return the error message.
+		$msg = "Error encountered when checking if running elevated."						
+		Write-PISysAudit_LogMessage $msg "Error" $fn -eo $_
+		return $false
+	}
 }
 
 function ValidateFileContent
@@ -743,7 +775,7 @@ param(
 		# Read from the global constant bag.
 		$pwdPath = (Get-Variable "PasswordPath" -Scope "Global").Value			
 		# Set the path.
-		$pwdFile = Join-Path -Path $pwdPath -ChildPath $File
+		$pwdFile = PathConcat -ParentPath $pwdPath -ChildPath $File
 		
 		# Decrypt.
 		
@@ -1119,6 +1151,23 @@ param(
 	}	
 }
 
+function Test-PowerShellToolsForPISystemAvailable
+{
+    # Check for availability of PowerShell Tools for the PI System
+    if( -not(Test-Path variable:global:ArePowerShellToolsAvailable) -and $PSVersionTable.PSVersion.Major -ge 3)
+	{
+		if(Get-Module -ListAvailable -Name OSIsoft.PowerShell)
+		{
+			Import-Module -Name OSIsoft.PowerShell
+			$global:ArePowerShellToolsAvailable = $true
+		}
+		else
+		{
+			$global:ArePowerShellToolsAvailable = $false
+		}
+	}
+}
+
 function StartComputerAudit
 {
 [CmdletBinding(DefaultParameterSetName="Default", SupportsShouldProcess=$false)]
@@ -1227,12 +1276,13 @@ param(
 					
 	# Get and store the function Name.
 	$fn = GetFunctionName
-	
+	$global:PIDataArchiveConnection = $null
+
 	try
 	{
 		# Read from the global constant bag.
-		$ShowUI = (Get-Variable "PISysAuditShowUI" -Scope "Global" -ErrorAction "SilentlyContinue").Value					
-		
+		$ShowUI = (Get-Variable "PISysAuditShowUI" -Scope "Global" -ErrorAction "SilentlyContinue").Value						
+
 		# Validate the presence of a PI Data Archive
 		if((ValidateIfHasPIDataArchiveRole -lc $ComputerParams.IsLocal -rcn $ComputerParams.ComputerName -dbgl $DBGLevel) -eq $false)
 		{
@@ -1254,22 +1304,65 @@ param(
 			# Return the error message.
 			$msgTemplate = "The PI Data Archive {0} is not accessible over port 5450"
 			$msg = [string]::Format($msgTemplate, $ComputerParams.ComputerName)
-			Write-PISysAudit_LogMessage $msg "Warning" $fn
+			Write-PISysAudit_LogMessage $msg "Error" $fn -eo $_
 			return
 		}
 
-		# After we've validated connections over 5450, make sure PI Utilities will be able to connect.
-		if($testConnection.Connected)
+		# Check for availability of PowerShell Tools for the PI System
+		Test-PowerShellToolsForPISystemAvailable
+
+		if($global:ArePowerShellToolsAvailable)
 		{
-			$outputFileContent = Invoke-PISysAudit_PIConfigScript -f "CheckPIServerAvailability.dif" `
-																-lc $ComputerParams.IsLocal -rcn $ComputerParams.ComputerName -dbgl $DBGLevel
-			if($null -eq $outputFileContent)
+			try
 			{
-				$msgTemplate = "Unable to access the PI Data Archive {0} with piconfig.  Check if there is a valid mapping for your user."
+				$global:PIDataArchiveConnection = Connect-PIDataArchive -PIDataArchiveMachineName $ComputerParams.ComputerName
+				if($global:PIDataArchiveConnection.Connected){
+					$msgTemplate = "Successfully connected to the PI Data Archive {0} with PowerShell."
+					$msg = [string]::Format($msgTemplate, $ComputerParams.ComputerName)
+					Write-PISysAudit_LogMessage $msg "Debug" $fn -dbgl $DBGLevel -rdbgl 2
+				}
+				else
+				{
+					$msgTemplate = "Unable to access the PI Data Archive {0} with PowerShell.  Check if there is a valid mapping for your user."
+					$msg = [string]::Format($msgTemplate, $ComputerParams.ComputerName)
+					Write-PISysAudit_LogMessage $msg "Warning" $fn
+					return
+				}
+			}
+			catch
+			{
+				# Return the error message.
+				$msgTemplate = "An error occurred connecting to the PI Data Archive {0} with PowerShell."
 				$msg = [string]::Format($msgTemplate, $ComputerParams.ComputerName)
-				Write-PISysAudit_LogMessage $msg "Warning" $fn
+				Write-PISysAudit_LogMessage $msg "Error" $fn -eo $_
 				return
 			}
+		}
+		else
+		{
+			$msgTemplate = "Unable to locate the PowerShell Tools for the PI System on the computer running this script.  The piconfig utility will be used instead."
+			Write-PISysAudit_LogMessage $msg "Info" $fn
+
+			# Get the piconfig CLU location on the machine where the script runs.		
+			if( -not(Test-Path variable:global:PISysAuditPIConfigExec) )
+			{
+				if((GetPIConfigExecPath -dbgl $DBGLevel) -eq $false) { return }
+			}
+
+			# After we've validated connections over 5450, make sure PI Utilities will be able to connect.
+			if($testConnection.Connected)
+			{
+				$outputFileContent = Invoke-PISysAudit_PIConfigScript -f "CheckPIServerAvailability.dif" `
+																	-lc $ComputerParams.IsLocal -rcn $ComputerParams.ComputerName -dbgl $DBGLevel
+				if($null -eq $outputFileContent)
+				{
+					$msgTemplate = "Unable to access the PI Data Archive {0} with piconfig.  Check if there is a valid mapping for your user."
+					$msg = [string]::Format($msgTemplate, $ComputerParams.ComputerName)
+					Write-PISysAudit_LogMessage $msg "Warning" $fn
+					return
+				}
+			}
+
 		}
 		
 		# Get the list of functions to execute.
@@ -1314,6 +1407,10 @@ param(
 			# Call the function.
 			& $function.Name $AuditTable -lc $ComputerParams.IsLocal -rcn $ComputerParams.ComputerName -dbgl $DBGLevel																																							
 		}
+
+		# Disconnect if PowerShell Tools are used.
+		if($global:PIDataArchiveConnection.Connected){$global:PIDataArchiveConnection.Disconnect()}
+
 		# Set the progress.
 		if($ShowUI)
 		{ Write-Progress -activity $activityMsg1 -Status $statusMsgCompleted -completed }
@@ -1325,6 +1422,37 @@ param(
 		Write-PISysAudit_LogMessage $msg "Error" $fn -eo $_				
 		return
 	}			
+}
+
+function PathConcat {
+param(							
+		[parameter(Mandatory=$true, Position=0, ParameterSetName = "Default")]
+		[alias("pp")]
+		[string]
+		$ParentPath,
+		[parameter(Mandatory=$true, ParameterSetName = "Default")]
+		[alias("cp")]
+		[string]
+		$ChildPath,
+		[parameter(Mandatory=$false, ParameterSetName = "Default")]
+		[alias("dbgl")]
+		[int]
+		$DBGLevel = 0)
+		
+	# Get and store the function Name.
+	$fn = GetFunctionName
+
+		try {
+		$FullPath = ($ParentPath.TrimEnd('\', '/') + '\' + $ChildPath.TrimStart('\', '/'))
+		return $FullPath
+		}
+		catch {
+		# Return the error message.
+		$msgTemplate = "An error occurred building file path {0} with PowerShell."
+		$msg = [string]::Format($msgTemplate, $FullPath)
+		Write-PISysAudit_LogMessage $msg "Error" $fn -eo $_
+		return
+		}
 }
 
 function StartPIAFServerAudit
@@ -1349,7 +1477,8 @@ param(
 	try
 	{
 		# Read from the global constant bag.
-		$ShowUI = (Get-Variable "PISysAuditShowUI" -Scope "Global" -ErrorAction "SilentlyContinue").Value					
+		$ShowUI = (Get-Variable "PISysAuditShowUI" -Scope "Global" -ErrorAction "SilentlyContinue").Value
+		$IsElevated = (Get-Variable "PISysAuditIsElevated" -Scope "Global" -ErrorAction "SilentlyContinue").Value				
 		
 		# Validate the presence of a PI AF Server
 		if((ValidateIfHasPIAFServerRole -lc $ComputerParams.IsLocal -rcn $ComputerParams.ComputerName -dbgl $DBGLevel) -eq $false)
@@ -1372,6 +1501,38 @@ param(
 			return
 		}						
 		
+		# Check for availability of PowerShell Tools for the PI System
+		Test-PowerShellToolsForPISystemAvailable
+
+		if($global:ArePowerShellToolsAvailable)
+		{
+			try
+			{
+				$global:AFServerConnection = Connect-AFServer -AFServer $(Get-AFServer -Name $ComputerParams.ComputerName)
+				if($global:AFServerConnection.ConnectionInfo.IsConnected)
+				{
+					$msgTemplate = "Successfully connected to the PI AF Server {0} with PowerShell."
+					$msg = [string]::Format($msgTemplate, $ComputerParams.ComputerName)
+					Write-PISysAudit_LogMessage $msg "Debug" $fn -dbgl $DBGLevel -rdbgl 2
+				}
+				else
+				{
+					$msgTemplate = "Unable to access the PI AF Server {0} with PowerShell.  Check if there is a valid mapping for your user."
+					$msg = [string]::Format($msgTemplate, $ComputerParams.ComputerName)
+					Write-PISysAudit_LogMessage $msg "Warning" $fn
+					return
+				}
+			}
+			catch
+			{
+				# Return the error message.
+				$msgTemplate = "An error occurred connecting to the PI Data Archive {0} with PowerShell."
+				$msg = [string]::Format($msgTemplate, $ComputerParams.ComputerName)
+				Write-PISysAudit_LogMessage $msg "Error" $fn -eo $_
+				return
+			}
+		}
+
 		# Set message templates.		
 		$activityMsgTemplate1 = "Check PI AF Server component on '{0}' computer"
 		$activityMsg1 = [string]::Format($activityMsgTemplate1, $ComputerParams.ComputerName)					
@@ -1450,15 +1611,39 @@ param(
 		$ShowUI = (Get-Variable "PISysAuditShowUI" -Scope "Global" -ErrorAction "SilentlyContinue").Value					
 				
 		# Validate the presence of a SQL Server
-		if((ValidateIfHasSQLServerRole -lc $ComputerParams.IsLocal -rcn $ComputerParams.ComputerName `
-										-InstanceName $ComputerParams.InstanceName -dbgl $DBGLevel) -eq $false)
-										
+		$global:UseSQLCmdlets = $PSVersionTable.PSVersion.Major -gt 2 -and $ComputerParams.PasswordFile -eq ""
+		if($global:UseSQLCmdlets)
 		{
-			# Return the error message.
-			$msgTemplate = "The computer {0} does not have a SQL Server role or the validation failed"
-			$msg = [string]::Format($msgTemplate, $ComputerParams.ComputerName)
-			Write-PISysAudit_LogMessage $msg "Warning" $fn
-			return
+			try
+			{
+				# Push and Pop are to prevent a context switch to the SQL shell from persisting after invocation of SQL commands.
+				Push-Location
+				Import-Module SQLPS -DisableNameChecking
+				Pop-Location
+				# Simplest query to return a response to ensure we can query the SQL server
+				Invoke-Sqlcmd_ScalarValue -Query 'SELECT 1 as TEST' -RemoteComputerName $ComputerParams.ComputerName -InstanceName $ComputerParams.InstanceName -ScalarValue 'TEST' | Out-Null
+			}
+			catch
+			{
+				# Return the error message.
+				$msgTemplate = "The computer {0} does not have a SQL Server role or the validation failed"
+				$msg = [string]::Format($msgTemplate, $ComputerParams.ComputerName)
+				Write-PISysAudit_LogMessage $msg "Warning" $fn
+				return
+			}
+		}
+		else
+		{
+			if((ValidateIfHasSQLServerRole -lc $ComputerParams.IsLocal -rcn $ComputerParams.ComputerName `
+											-InstanceName $ComputerParams.InstanceName -dbgl $DBGLevel) -eq $false)
+										
+			{
+				# Return the error message.
+				$msgTemplate = "The computer {0} does not have a SQL Server role or the validation failed"
+				$msg = [string]::Format($msgTemplate, $ComputerParams.ComputerName)
+				Write-PISysAudit_LogMessage $msg "Warning" $fn
+				return
+			}
 		}
 		
 		# Get the list of functions to execute.
@@ -1554,13 +1739,21 @@ param(
 	{
 		# Read from the global constant bag.
 		$ShowUI = (Get-Variable "PISysAuditShowUI" -Scope "Global" -ErrorAction "SilentlyContinue").Value					
-				
+		$IsElevated = (Get-Variable "PISysAuditIsElevated" -Scope "Global" -ErrorAction "SilentlyContinue").Value	
+			
 		# Validate the presence of IIS
 		if((ValidateIfHasPICoresightRole -lc $ComputerParams.IsLocal -rcn $ComputerParams.ComputerName -dbgl $DBGLevel) -eq $false)
 		{
 			# Return the error message.
 			$msgTemplate = "The computer {0} does not have the PI Coresight role or the validation failed"
 			$msg = [string]::Format($msgTemplate, $ComputerParams.ComputerName)
+			Write-PISysAudit_LogMessage $msg "Warning" $fn
+			return
+		}
+
+		if($ComputerParams.IsLocal -and -not($IsElevated))
+		{
+			$msg = "Elevation required to run Audit checks using IIS Cmdlet.  Run PowerShell as Administrator to complete these checks."
 			Write-PISysAudit_LogMessage $msg "Warning" $fn
 			return
 		}
@@ -1663,6 +1856,10 @@ PROCESS
 		# Set folder names required by the script.
 		SetFolders
 		
+		# Set global variable checking for elevated status.
+		$IsElevated = CheckIfRunningElevated
+		New-Variable -Name "PISysAuditIsElevated" -Scope "Global" -Visibility "Public" -Value $IsElevated
+
 		# Validate if used with PowerShell version 2.x and more	
 		$majorVersionPS = $Host.Version.Major	
 		if($majorVersionPS -lt 2)
@@ -1697,9 +1894,6 @@ PROCESS
 		
 		# Set the ShowUI flag
 		New-Variable -Name "PISysAuditShowUI" -Scope "Global" -Visibility "Public" -Value $ShowUI		
-		
-		# Get the piconfig CLU location on the machine where the script runs.		
-		if((GetPIConfigExecPath -dbgl $DBGLevel) -eq $false) { return }
 									
 		# Set an PISysAuditInitialized flag
 		New-Variable -Name "PISysAuditInitialized" -Scope "Global" -Visibility "Public" -Value $true				
@@ -1805,7 +1999,7 @@ PROCESS
 		}
 			
 		# Set the path.
-		$pwdFile = Join-Path -Path $pwdPath -ChildPath $file
+		$pwdFile = PathConcat -ParentPath $pwdPath -ChildPath $file
 		
 		# Encrypt.	
 		
@@ -2001,78 +2195,6 @@ END {}
 #End of exported function
 #***************************
 }
-	
-function Set-PISysAudit_EnvVariable
-{
-<#  
-.SYNOPSIS
-(Core functionality) Set a machine related environment variable.
-.DESCRIPTION
-Set a machine related environment variable.
-#>
-[CmdletBinding(DefaultParameterSetName="Default", SupportsShouldProcess=$false)]     
-param(
-		[parameter(Mandatory=$true, Position=0, ParameterSetName = "Default")]
-		[alias("vn")]
-		[string]
-		$VariableName,
-		[parameter(Mandatory=$true, Position=1, ParameterSetName = "Default")]
-		[alias("v")]
-		[string]
-		$Value,
-		[parameter(Mandatory=$false, ParameterSetName = "Default")]
-		[alias("lc")]
-		[boolean]
-		$LocalComputer = $true,
-		[parameter(Mandatory=$false, ParameterSetName = "Default")]
-		[alias("rcn")]
-		[string]
-		$RemoteComputerName = "",
-		[parameter(Mandatory=$false, ParameterSetName = "Default")]
-		[alias("dbgl")]
-		[int]
-		$DBGLevel = 0)
-BEGIN {}
-PROCESS
-{
-	$fn = GetFunctionName
-	
-	# Write to an environment variable.
-	# Always use the Machine context to read the variable.
-	try
-	{
-		# Execute the SetEnvironmentVariable method locally or remotely via the Invoke-Command cmdlet.
-		# Always use the Machine context to write the variable.
-		if($LocalComputer)
-		{
-			[Environment]::SetEnvironmentVariable($VariableName, $Value, "Machine")				
-		}				
-		else
-		{			
-			$scriptBlockCmd = [string]::Format("[Environment]::SetEnvironmentVariable(""{0}"", ""{1}"", ""Machine"")", $VariableName)									
-			$scriptBlock = [scriptblock]::create( $scriptBlockCmd )
-			$value = Invoke-Command -ComputerName $RemoteComputerName -ScriptBlock $scriptBlock
-		}				
-	}
-	catch
-	{		
-		# Return the error message.
-		$msgTemplate1 = "A problem occurred while setting the environment variable: {0} on local machine."
-		$msgTemplate2 = "A problem occurred while setting the environment variable: {0} on {1} machine."
-		if($LocalComputer)
-		{ $msg = [string]::Format($msgTemplate1, $_.Exception.Message) }
-		else
-		{ $msg = [string]::Format($msgTemplate2, $_.Exception.Message, $RemoteComputerName) }
-		Write-PISysAudit_LogMessage $msg "Error" $fn -eo $_				
-	}		
-}
-
-END {}
-
-#***************************
-#End of exported function
-#***************************
-}
 
 function Get-PISysAudit_EnvVariable
 {
@@ -2222,7 +2344,7 @@ PROCESS
 		if($LocalComputer)
 		{ $msg = [string]::Format($msgTemplate1, $_.Exception.Message) }
 		else
-		{ $msg = [string]::Format($msgTemplate2, $_.Exception.Message) }
+		{ $msg = [string]::Format($msgTemplate2, $_.Exception.Message, $RemoteComputerName) }
 		Write-PISysAudit_LogMessage $msg "Error" $fn -eo $_				
 		return $null
 	}
@@ -2503,62 +2625,6 @@ END {}
 #***************************
 }
 
-function Get-PISysAudit_OSSKU
-{
-<#  
-.SYNOPSIS
-(Core functionality) Get operating system sku.
-.DESCRIPTION
-Get operating system sku.
-#>
-[CmdletBinding(DefaultParameterSetName="Default", SupportsShouldProcess=$false)]     
-param(
-		[parameter(Mandatory=$false, ParameterSetName = "Default")]
-		[alias("lc")]
-		[boolean]
-		$LocalComputer = $true,
-		[parameter(Mandatory=$false, ParameterSetName = "Default")]
-		[alias("rcn")]
-		[string]
-		$RemoteComputerName = "",
-		[parameter(Mandatory=$false, ParameterSetName = "Default")]
-		[alias("dbgl")]
-		[int]
-		$DBGLevel = 0)
-BEGIN {}
-PROCESS
-{					
-	$fn = GetFunctionName
-	
-	try
-	{
-		$className = "Win32_OperatingSystem"
-		$namespace = "root\CIMV2"
-		$filterExpression = ""
-		$WMIObject = ExecuteWMIQuery $className -n $namespace -lc $LocalComputer -rcn $RemoteComputerName -FilterExpression $filterExpression -DBGLevel $DBGLevel								
-		return $WMIObject.OperatingSystemSKU								
-	}	
-	catch
-	{		
-		# Return the error message.
-		$msgTemplate1 = "Query the WMI classes from local computer has failed"
-		$msgTemplate2 = "Query the WMI classes from {0} has failed"
-		if($LocalComputer)
-		{ $msg = $msgTemplate1 }
-		else
-		{ $msg = [string]::Format($msgTemplate2, $RemoteComputerName) }		
-		Write-LogMessage $msg "Error" $fn -eo $_
-		return $null				
-	}	
-}
-
-END {}
-
-#***************************
-#End of exported function
-#***************************
-}
-
 function Get-PISysAudit_InstalledComponents
 {
 <#
@@ -2759,7 +2825,7 @@ PROCESS
 		
 		# Set the path to netsh CLU.
 		$windowsFolder = Get-PISysAudit_EnvVariable "WINDIR" -lc $LocalComputer -rcn $RemoteComputerName
-		$netshExec = Join-Path -Path $windowsFolder -ChildPath "System32\netsh.exe"
+		$netshExec = PathConcat -ParentPath $windowsFolder -ChildPath "System32\netsh.exe"
 
 		if($LocalComputer)
 		{			
@@ -2773,12 +2839,12 @@ PROCESS
 			# Get the PIHome folder.
 			$PIHome_path = Get-PISysAudit_EnvVariable "PIHOME" -lc $false -rcn $RemoteComputerName											           
 			# Set the log folder.
-			$scriptTempFileLocation = Join-Path -Path $PIHome_path -ChildPath "log"                          			                                						
+			$scriptTempFileLocation = PathConcat -ParentPath $PIHome_path -ChildPath "dat"                          			                                						
 			# Set the arguments of netsh.exe
 			$argList = "'advfirewall show allprofiles state'"
 		}
 		# Set the output for the CLU.
-		$outputFilePath = Join-Path -Path $scriptTempFileLocation -ChildPath "netsh_output.txt"
+		$outputFilePath = PathConcat -ParentPath $scriptTempFileLocation -ChildPath "netsh_output.txt"
 		$outputFileContent = ExecuteCommandLineUtility -lc $LocalComputer -rcn $RemoteComputerName -UtilityExec $netshExec `
 																			-ArgList $argList -OutputFilePath $outputFilePath -dbgl $DBGLevel
 		
@@ -2925,7 +2991,7 @@ PROCESS
 
 		# Set the path to the inner script.
 		$scriptsPath = (Get-Variable "scriptsPath" -Scope "Global").Value														
-		$checkProcessPrivilegePSScript = Join-Path -Path $scriptsPath -ChildPath "CheckProcessPrivilege.ps1"																											
+		$checkProcessPrivilegePSScript = PathConcat -ParentPath $scriptsPath -ChildPath "CheckProcessPrivilege.ps1"																											
 		#......................................................................................
 		# Verbose only if Debug Level is 2+
 		#......................................................................................
@@ -3022,14 +3088,23 @@ PROCESS
 		# Set the PIPC folder (64 bit).		
 		$PIHome64_path = Get-PISysAudit_EnvVariable "PIHOME64" -lc $LocalComputer -rcn $RemoteComputerName
 		# Set the PIPC\AF folder (64 bit).		
-		$PIHome_AF_path = Join-Path -Path $PIHome64_path -ChildPath "AF"
+		$PIHome_AF_path = PathConcat -ParentPath $PIHome64_path -ChildPath "AF"
 		# Set the path to reach out the afdiag.exe CLU.
-		$AFDiagExec = Join-Path -Path $PIHome_AF_path -ChildPath "afdiag.exe"
+		$AFDiagExec = PathConcat -ParentPath $PIHome_AF_path -ChildPath "afdiag.exe"
 		# Set the path to reach out the AFService executable.
-		$pathToService = Join-Path -Path $PIHome_AF_path -ChildPath "AFService.exe"
+		$pathToService = PathConcat -ParentPath $PIHome_AF_path -ChildPath "AFService.exe"
 
 		if($LocalComputer)
 		{						
+			$IsElevated = (Get-Variable "PISysAuditIsElevated" -Scope "Global" -ErrorAction "SilentlyContinue").Value
+			
+			if(-not($IsElevated))
+			{
+				$msg = "Elevation required to run Audit checks using AFDiag.  Run PowerShell as Administrator to complete these checks."
+				Write-PISysAudit_LogMessage $msg "Warning" $fn
+				return $null
+			}
+
 			# Set the output folder.
 			$scriptTempFilesPath = (Get-Variable "scriptsPathTemp" -Scope "Global").Value 
 			# Define the arguments required by the afdiag.exe command						
@@ -3039,14 +3114,14 @@ PROCESS
 		{																		
 			$PIHome_path = Get-PISysAudit_EnvVariable "PIHOME" -lc $false -rcn $RemoteComputerName
 			# Set the PIPC\log folder (64 bit).
-			$scriptTempFilesPath = Join-Path -Path $PIHome_path -ChildPath "log"		                                       						                                   					                                      
+			$scriptTempFilesPath = PathConcat -ParentPath $PIHome_path -ChildPath "dat"		                                       						                                   					                                      
 			# Define the arguments required by the afdiag.exe command						
 			$argListTemplate = "'/ExeFile:`"{0}`"'"	
 		}
 		$argList = [string]::Format($ArgListTemplate, $pathToService)
 		
 		# Set the output for the CLU.
-        $outputFilePath = Join-Path -Path $scriptTempFilesPath -ChildPath "afdiag_output.txt"
+        $outputFilePath = PathConcat -ParentPath $scriptTempFilesPath -ChildPath "afdiag_output.txt"
 		$outputFileContent = ExecuteCommandLineUtility -lc $LocalComputer -rcn $RemoteComputerName -UtilityExec $AFDiagExec `
 														-ArgList $argList -OutputFilePath $outputFilePath -Operation $Operation -DBGLevel $DBGLevel	
 		
@@ -3175,14 +3250,14 @@ PROCESS
 			if($UseAdhocScript)
 			{
 				# Set the path for the .dif file containing the script for piconfig.exe
-				$PIConfigInputFilePath = Join-Path -Path $scriptsPathTemp -ChildPath "input.dif"         								
+				$PIConfigInputFilePath = PathConcat -ParentPath $scriptsPathTemp -ChildPath "input.dif"         								
 				# Create the input file.
 				Out-File -FilePath $PIConfigInputFilePath -InputObject $PIConfigScript -Encoding ASCII
 			}
 			else
 			{
 				# Set the path for the .dif file containing the script for piconfig.exe				
-				$PIConfigInputFilePath = Join-Path -Path $picnfgPath -ChildPath $File								
+				$PIConfigInputFilePath = PathConcat -ParentPath $picnfgPath -ChildPath $File								
 				
 				# Validate that the .dif file specified exists.
 				if((Test-Path $PIConfigInputFilePath) -eq $false)
@@ -3200,8 +3275,8 @@ PROCESS
 			
 			# Construct new input file for the CLU
 			# Set the PIconfig output
-			$outputFilePath = Join-Path -Path $scriptsPathTemp -ChildPath "piconfig_output.txt"
-			$inputFilePath = Join-Path -Path $scriptsPathTemp -ChildPath "piconfig_input.dif"
+			$outputFilePath = PathConcat -ParentPath $scriptsPathTemp -ChildPath "piconfig_output.txt"
+			$inputFilePath = PathConcat -ParentPath $scriptsPathTemp -ChildPath "piconfig_input.dif"
 			
 
 			if(Test-Path $outputFilePath){Clear-Content $outputFilePath}
@@ -3218,7 +3293,7 @@ PROCESS
 				-RedirectStandardInput $inputFilePath `
 				-Wait -NoNewWindow			
 				
-		#	$msg = Get-Content -Path $outputDebugFilePath | Out-String
+			#	$msg = Get-Content -Path $outputDebugFilePath | Out-String
 			Write-PISysAudit_LogMessage $msg "Debug" $fn -dbgl $DBGLevel -rdbgl 2
 
 			# Read the content.
@@ -3258,14 +3333,14 @@ PROCESS
 			if($UseAdhocScript)
 			{
 				# Set the path for the .dif file containing the script for piconfig.exe
-				$PIConfigInputFilePath = Join-Path -Path $scriptsPathTemp -ChildPath "input.dif"         
+				$PIConfigInputFilePath = PathConcat -ParentPath $scriptsPathTemp -ChildPath "input.dif"         
 				# Create the input file.
 				Out-File -FilePath $PIConfigInputFilePath -InputObject $PIConfigScript -Encoding ASCII
 			}
 			else
 			{
 				# Set the path for the .dif file containing the script for piconfig.exe				
-				$PIConfigInputFilePath = Join-Path -Path $picnfgPath -ChildPath $File				
+				$PIConfigInputFilePath = PathConcat -ParentPath $picnfgPath -ChildPath $File				
 				
 
 				# Validate that the .dif file specified exists.
@@ -3282,17 +3357,17 @@ PROCESS
 			# Use the Windows IS authentication mechanism first and the Trust one if
 			# if fails.
 			$argList1 = [string]::Format(" -Node `"{0}`" -Windows", $RemoteComputerName)					
-			$argList2 = [string]::Format(" -Node `"{0}`" -Trust", $RemoteComputerName)					
-			# Set the output for the CLU.
-			$outputFilePath = Join-Path -Path $scriptsPathTemp -ChildPath "piconfig_output.txt"														
+			$argList2 = [string]::Format(" -Node `"{0}`" -Trust", $RemoteComputerName)																		
 			
 			# Construct new input file for the CLU
 			# Set the PIconfig output
-			$outputFilePath = Join-Path -Path $scriptsPathTemp -ChildPath "piconfig_output.txt"
-			$inputFilePath = Join-Path -Path $scriptsPathTemp -ChildPath "piconfig_input.dif"
+			$outputFilePath = PathConcat -ParentPath $scriptsPathTemp -ChildPath "piconfig_output.txt"
+			$inputFilePath = PathConcat -ParentPath $scriptsPathTemp -ChildPath "piconfig_input.dif"
+			$errFilePath = PathConcat -ParentPath $scriptsPathTemp -ChildPath "piconfig_err_output.txt"
 
 			if(Test-Path $outputFilePath){Clear-Content $outputFilePath}
 			if(Test-Path $inputFilePath){Clear-Content $inputFilePath}
+			if(Test-Path $errFilePath){Clear-Content $errFilePath}
 
 			Out-File -FilePath $inputFilePath -InputObject ("@outp " + $outputFilePath) -Encoding ASCII	
 			Add-Content -Path $inputFilePath -Value ("@echo none")
@@ -3304,6 +3379,7 @@ PROCESS
 			Start-Process -FilePath $PIConfigExec `
 				-ArgumentList $argList1 `
 				-RedirectStandardInput $inputFilePath `
+				-RedirectStandardOutput $errFilePath `
 				-Wait -NoNewWindow																					
 			
 			#......................................................................................
@@ -3311,7 +3387,23 @@ PROCESS
 			#......................................................................................			
 			$outputFileContent = Get-Content -Path $outputFilePath												
 			
-			if($null -eq $outputFileContent){$outputFileContent = ""}
+			if($null -eq $outputFileContent)
+			{
+				$outputFileContent = ""
+				$errFileContent = Get-Content -Path $errFilePath
+				if($null -ne $errFileContent)
+				{ 
+					if(ValidateFileContent $errFileContent "no read access")
+					{
+						# Return the error message.		
+						$msgTemplate = "An authentication or authorization issue occurred with piconfig while running {0}"
+						$msg = [string]::Format($msgTemplate, $inputFilePath)
+						Write-PISysAudit_LogMessage $msg "Error" $fn
+						return $null
+					}
+				}
+			}
+
 			#......................................................................................			
 			# Validate that the command succeeded
 			#......................................................................................									
@@ -3343,6 +3435,8 @@ PROCESS
 			}
 
 			if(Test-Path $outputFilePath){Remove-Item $outputFilePath}
+			if(Test-Path $inputFilePath){Remove-Item $inputFilePath}
+			if(Test-Path $errFilePath){Remove-Item $errFilePath}
 		}
 							
 		# Return the output file path.
@@ -3400,9 +3494,9 @@ PROCESS
 		# Get the PI folder.
 		$PIServer_path = Get-PISysAudit_EnvVariable "PISERVER" -lc $LocalComputer -rcn $RemoteComputerName
 		# Set the ADM folder.
-		$PIServer_adm_path = Join-Path -Path $PIServer_path -ChildPath "adm"
+		$PIServer_adm_path = PathConcat -ParentPath $PIServer_path -ChildPath "adm"
 		# Set the path to reach out the piversion.exe CLU.
-		$PIVersionExec = Join-Path -Path $PIServer_adm_path -ChildPath "piversion.exe"
+		$PIVersionExec = PathConcat -ParentPath $PIServer_adm_path -ChildPath "piversion.exe"
 
 		if($LocalComputer)
 		{			                                       			
@@ -3412,7 +3506,7 @@ PROCESS
 			# Get the Scripts Temp path.
 			$scriptsPathTemp = (Get-Variable "scriptsPathTemp" -Scope "Global").Value		                                       						
 			# Set the output for the CLU.
-			$outputFilePath = Join-Path -Path $scriptsPathTemp -ChildPath "piversion_output.txt"
+			$outputFilePath = PathConcat -ParentPath $scriptsPathTemp -ChildPath "piversion_output.txt"
 		}
 		else
 		{						                                       						
@@ -3424,9 +3518,9 @@ PROCESS
 			# Get the PIHome folder.
 			$PIHome_path = Get-PISysAudit_EnvVariable "PIHOME" -lc $false -rcn $RemoteComputerName
 			# Set the ADM folder.
-			$PIHome_log_path = Join-Path -Path $PIHome_path -ChildPath "log"
+			$PIHome_log_path = PathConcat -ParentPath $PIHome_path -ChildPath "dat"
 			# Set the output for the CLU.
-			$outputFilePath = Join-Path -Path $PIHome_log_path -ChildPath "piversion_output.txt"								
+			$outputFilePath = PathConcat -ParentPath $PIHome_log_path -ChildPath "piversion_output.txt"								
 		}
 		$outputFileContent = ExecuteCommandLineUtility -lc $LocalComputer -rcn $RemoteComputerName -UtilityExec $PIVersionExec -ArgList $argList -OutputFilePath $outputFilePath -DBGLevel $DBGLevel
 		
@@ -3564,7 +3658,7 @@ PROCESS
 			{ 
 			# Dealing with Alias (CNAME). 
 
-			$spnCheck = $(setspn -l $svcaccMod).ToLower() 
+			$spnCheck = $(setspn -l $svcaccMod)
 
 			# Verify hostnane AND FQDN SPNs are assigned to the service account.
 			#
@@ -3605,12 +3699,13 @@ PROCESS
 			{ 
 			# Host (A) 
 
-			$spnCheck = $(setspn -l $svcaccMod).ToLower() 
+			$spnCheck = $(setspn -l $svcaccMod) 
 
 			# Verify hostnane AND FQDN SPNs are assigned to the service account.
 			$spnCounter = 0
 			$csCHeaderSPN = $($serviceType.ToLower() + "/" + $csCHeaderShort.ToLower())
 			$csCHeaderLongSPN = $($serviceType.ToLower() + "/" + $csCHeaderLong.ToLower())
+			# Loop through SPNs, trimming and ensure all lower for comparison
 			foreach($line in $spnCheck)
 			{
 				switch($line.ToLower().Trim())
@@ -3662,13 +3757,14 @@ PROCESS
 			$svcaccMod = $hostname 
 		}
 
-		# Run setspn and convert it to a string (no capital letters).
-		$spnCheck = $(setspn -l $svcaccMod).ToLower() 
+		# Run setspn
+		$spnCheck = $(setspn -l $svcaccMod)
 
 		# Verify hostnane AND FQDN SPNs are assigned to the service account.
 		$spnCounter = 0
 		$hostnameSPN = $($serviceType.ToLower() + "/" + $hostname.ToLower())
 		$fqdnSPN = $($serviceType.ToLower() + "/" + $fqdn.ToLower())
+		# Loop through SPNs, trimming and ensure all lower for comparison
 		foreach($line in $spnCheck)
 		{
 			switch($line.ToLower().Trim())
@@ -3801,6 +3897,67 @@ PROCESS
 	
 	# Close the connection.
 	if(!($null -eq $conn)) { $conn.Close() }
+	return $value
+}
+
+END {}
+
+#***************************
+#End of exported function
+#***************************
+}
+
+function Invoke-Sqlcmd_ScalarValue
+{
+<#
+.SYNOPSIS
+(Core functionality) Perform a SQL query against a local/remote computer using the Invoke-Sqlcmd Cmdlet.
+.DESCRIPTION
+Perform a SQL query against a local/remote computer using the Invoke-Sqlcmd Cmdlet.
+#>
+[CmdletBinding(DefaultParameterSetName="Default", SupportsShouldProcess=$false)]     
+param(
+		[parameter(Mandatory=$true, ParameterSetName = "Default")]		
+		[AllowEmptyString()]
+		[alias("rcn")]
+		[string]
+		$RemoteComputerName,		
+		[parameter(Mandatory=$true, ParameterSetName = "Default")]
+		[alias("q")]
+		[string]
+		$Query,
+		[parameter(Mandatory=$true, ParameterSetName = "Default")]				
+		[string]
+		$ScalarValue,
+		[parameter(Mandatory=$false, ParameterSetName = "Default")]				
+		[string]
+		$InstanceName = "",									
+		[parameter(Mandatory=$false, ParameterSetName = "Default")]		
+		[boolean]
+		$IntegratedSecurity = $true,							
+		[parameter(Mandatory=$false, ParameterSetName = "Default")]		
+		[alias("dbgl")]
+		[int]
+		$DBGLevel = 0)
+BEGIN {}
+PROCESS		
+{		
+	$fn = GetFunctionName		
+															
+	try
+	{
+		if($null -eq $InstanceName -or $InstanceName -eq "Default"){ $ServerInstance = $RemoteComputerName }
+		else{ $ServerInstance = $RemoteComputerName + '\' + $InstanceName }
+		$value = Invoke-Sqlcmd -Query $query -ServerInstance $ServerInstance | Select-Object -ExpandProperty $ScalarValue
+	}
+	catch
+	{
+		# Return the error message.
+		$msgTemplate = "A problem occurred during the SQL Query: {0}"
+		$msg = [string]::Format($msgTemplate, $_.Exception.Message)
+		Write-PISysAudit_LogMessage $msg "Error" $fn -eo $_		
+		$value = $null
+	}
 	return $value
 }
 
@@ -3951,9 +4108,9 @@ PROCESS
 			# Set the path to reach out the sqlcmd.exe CLU. This CLU is called from any location.
 			$sqlcmdExec = "sqlcmd.exe"
 			# Set the input for the CLU.
-            $inputFilePath = Join-Path -Path $scriptsPathTemp -ChildPath "sqlcmd_input.txt"                						
+            $inputFilePath = PathConcat -ParentPath $scriptsPathTemp -ChildPath "sqlcmd_input.txt"                						
 			# Set the output for the CLU.
-            $outputFilePath = Join-Path -Path $scriptsPathTemp -ChildPath "sqlcmd_output.txt"                                 									
+            $outputFilePath = PathConcat -ParentPath $scriptsPathTemp -ChildPath "sqlcmd_output.txt"                                 									
 			# Define the arguments required by the sqlcmd.exe command						
 			# S ... for Server\instance name
 			# E ... for integrated security
@@ -4011,9 +4168,9 @@ PROCESS
 			# Set the path to reach out the sqlcmd.exe CLU. This CLU is called from any location.
 			$sqlcmdExec = "sqlcmd.exe"
 			# Set the input for the CLU.
-            $inputFilePath = Join-Path -Path $workPath -ChildPath "sqlcmd_input.txt"                						
+            $inputFilePath = PathConcat -ParentPath $workPath -ChildPath "sqlcmd_input.txt"                						
 			# Set the output for the CLU.
-            $outputFilePath = Join-Path -Path $workPath -ChildPath "sqlcmd_output.txt"                                 						
+            $outputFilePath = PathConcat -ParentPath $workPath -ChildPath "sqlcmd_output.txt"                                 						
 			# Define the arguments required by the sqlcmd.exe command						
 			# S ... for Server\instance name
 			# E ... for integrated security
@@ -4161,7 +4318,11 @@ param(
 		[parameter(Mandatory=$true, Position=5, ParameterSetName = "Default")]
 		[alias("aiv")]
 		[object]
-		$AuditItemValue,		
+		$AuditItemValue,
+		[parameter(Mandatory=$true, Position=5, ParameterSetName = "Default")]
+		[alias("aif")]
+		[String]
+		$AuditItemFunction,		
 		[parameter(Mandatory=$false, ParameterSetName = "Default")]
 		[alias("msg")]
 		[String]
@@ -4210,6 +4371,7 @@ PROCESS
 	Add-Member -InputObject $tempObj -MemberType NoteProperty -Name "ServerName" -Value $computerName
 	Add-Member -InputObject $tempObj -MemberType NoteProperty -Name "AuditItemName" -Value $AuditItemName
 	Add-Member -InputObject $tempObj -MemberType NoteProperty -Name "AuditItemValue" -Value $AuditItemValue	
+	Add-Member -InputObject $tempObj -MemberType NoteProperty -Name "AuditItemFunction" -Value $AuditItemFunction
 	Add-Member -InputObject $tempObj -MemberType NoteProperty -Name "MessageList" -Value $MessageList
 	Add-Member -InputObject $tempObj -MemberType NoteProperty -Name "Group1" -Value $Group1
 	Add-Member -InputObject $tempObj -MemberType NoteProperty -Name "Group2" -Value $Group2
@@ -4448,7 +4610,7 @@ PROCESS
 			# Read from the global constant bag.		
 			$pwdPath = (Get-Variable "PasswordPath" -Scope "Global").Value			
 			# Set the path.
-			$pwdFile = Join-Path -Path $pwdPath -ChildPath $PasswordFile
+			$pwdFile = PathConcat -ParentPath $pwdPath -ChildPath $PasswordFile
 	
 			# Test the password file
 			if((Test-Path $pwdFile) -eq $false)
@@ -4550,7 +4712,7 @@ PROCESS
 						
 		# Create the log file in the same folder as the script. 
 		$fileName = "PISecurityAudit_$reportFileTimestamp.csv"
-		$fileToExport = Join-Path -Path $exportPath -ChildPath $fileName
+		$fileToExport = PathConcat -ParentPath $exportPath -ChildPath $fileName
 
 		# Build a collection for output.
 		$results = @()	
@@ -4583,7 +4745,7 @@ PROCESS
 			
 			$fileName = "PISecurityAudit_DetailReport_$reportFileTimestamp.html" 
 
-			$fileToExport = Join-Path -Path $exportPath -ChildPath $fileName
+			$fileToExport = PathConcat -ParentPath $exportPath -ChildPath $fileName
 
 
 			# Construct HTML table and color code the rows by result and severity.
@@ -4631,7 +4793,7 @@ PROCESS
 										<h2>Recommendations for failed validations:</h2>"
 		
 				$fails | ForEach-Object{
-					$AuditFunctionName = (Get-Help $_.ID)[0].Name
+					$AuditFunctionName = $_.AuditItemFunction
 					$recommendationInfo = Get-Help $AuditFunctionName
 					if($PSVersionTable.PSVersion.Major -eq 2){$recommendationInfoDescription = $recommendationInfo.Description[0].Text} 
 					else {$recommendationInfoDescription = $recommendationInfo.Description.Text}
@@ -4973,16 +5135,15 @@ Set-Alias pwdondisk New-PISysAudit_PasswordOnDisk
 # Export Module Member
 # ........................................................................
 # <Do not remove>
+Export-ModuleMember PathConcat
 Export-ModuleMember Initialize-PISysAudit
 Export-ModuleMember Set-PISysAudit_SaltKey
-Export-ModuleMember Set-PISysAudit_EnvVariable
 Export-ModuleMember Get-PISysAudit_EnvVariable
 Export-ModuleMember Get-PISysAudit_RegistryKeyValue
 Export-ModuleMember Get-PISysAudit_TestRegistryKey
 Export-ModuleMember Get-PISysAudit_ServiceLogOnAccount
 Export-ModuleMember Get-PISysAudit_ServiceState
 Export-ModuleMember Get-PISysAudit_CheckPrivilege
-Export-ModuleMember Get-PISysAudit_OSSKU
 Export-ModuleMember Get-PISysAudit_InstalledComponents
 Export-ModuleMember Get-PISysAudit_InstalledKBs
 Export-ModuleMember Get-PISysAudit_InstalledWin32Feature
@@ -4993,6 +5154,7 @@ Export-ModuleMember Invoke-PISysAudit_PIConfigScript
 Export-ModuleMember Invoke-PISysAudit_PIVersionCommand
 Export-ModuleMember Invoke-PISysAudit_ADONET_ScalarValueFromSQLServerQuery
 Export-ModuleMember Invoke-PISysAudit_SQLCMD_ScalarValueFromSQLServerQuery
+Export-ModuleMember Invoke-Sqlcmd_ScalarValue
 Export-ModuleMember Invoke-PISysAudit_SPN
 Export-ModuleMember Get-PISysAudit_IISproperties
 Export-ModuleMember New-PISysAuditObject
@@ -5005,6 +5167,7 @@ Export-ModuleMember -Alias piauditparams
 Export-ModuleMember -Alias pisysauditparams
 Export-ModuleMember -Alias piaudit
 Export-ModuleMember -Alias pwdondisk
+Export-ModuleMember Test-PowerShellToolsForPISystemAvailable
 # </Do not remove>
 
 # ........................................................................

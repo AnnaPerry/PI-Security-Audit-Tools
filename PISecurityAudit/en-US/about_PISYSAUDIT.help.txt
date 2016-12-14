@@ -88,15 +88,13 @@ VALIDATION CHECKS AND COMPLIANCE CONDITIONS
 		PI System relies on Windows Integrated Security and AD to automatically enable higher 
 		strength ciphers.
 
-		AU10002 - Operating System SKU
-		VALIDATION: verifies that the OS Stock Keeping Unit (SKU) is appropriate for 
-		production use.
-		COMPLIANCE: SKU should match one of the following: 12, 13, 14, 29, 39, 40, 41 or 42.
-		All SKU values are viewable here: 
+		AU10002 - Operating System Installation Type
+		VALIDATION: verifies that the OS installation type is server core for the 
+		reduced surface area.
+		COMPLIANCE: Installation Type should be Server Core. Different SKUs are
+		available at the link below:
 		http://msdn.microsoft.com/en-us/library/ms724358.aspx  
-		These SKUs were chosen to highlight the reduced attack surface area of a core 
-		installation of Windows Server.  For more on the advantages of Windows Server Core, 
-		please see:
+		For more on the advantages of Windows Server Core, please see:
 		https://msdn.microsoft.com/en-us/library/hh846314(v=vs.85).aspx 
 
 		AU10003 - Firewall Enabled
@@ -132,12 +130,16 @@ VALIDATION CHECKS AND COMPLIANCE CONDITIONS
 		removing PIWorld access, you need to evaluate which applications are relying on that 
 		access so that you can grant those applications access explicitly.
 
-		AU20002 - PI Admin Trusts Disabled Check
-		VALIDATION: verifies that the piadmin PI User cannot be used in a PI Trust. 
-		COMPLIANCE: disable Trusts with piadmin.  This can be done by checking "User 
-		cannot be used in a Trust" in the Properties menu for the piadmin PI User.  To access
-		this menu open use the Idenitities, Users, & Groups plugin in PI SMT, navigate to the 
-		PI User tab, right click the piadmin entry and select Properties in the context menu.
+		AU20002 - PI Admin Usage Check
+		VALIDATION: verifies that the piadmin PI User is not used in mappings or trusts.
+		COMPLIANCE: replace any trusts or mappings that use piadmin with a mapping or trust to a
+		PI Identity with appropriate privilege for the applications that will use it.  Will also
+		check if trusts with piadmin have been disabled globally.  This can be done by checking 
+		"User cannot be used in a Trust" in the Properties menu for the piadmin PI User.  To 
+		access this menu open use the Idenitities, Users, & Groups plugin in PI SMT, navigate to 
+		the PI User tab, right click the piadmin entry and select Properties in the context menu.  
+		For more information, see "Security Best Practice" #4 in KB00833: 
+		https://techsupport.osisoft.com/Troubleshooting/KB/KB00833 
 
 		AU20003 - PI Data Archive SubSystem Version Check
 		VALIDATION: verifies that the PI Data Archive is using the most recent release.   
@@ -176,18 +178,12 @@ VALIDATION CHECKS AND COMPLIANCE CONDITIONS
 		Best Practice #3" in KB00833. 
 		https://techsupport.osisoft.com/Troubleshooting/KB/KB00833 
 
-		AU20008 - Check if piadmin is not used
-		VALIDATION: verifies that piadmin is not used in trusts or mappings. 
-		COMPLIANCE: replace any trusts or mappings that use piadmin with a mapping or trust to a
-		PI Identity with appropriate privilege for the applications that will use it.  For more 
-		information, see "Security Best Practice" #4 in KB00833: 
-		https://techsupport.osisoft.com/Troubleshooting/KB/KB00833 
-
-		AU20009 - Check PI Server SPN
+		AU20008 - Check PI Server SPN
 		VALIDATION: Checks PI Data Archive SPN assignment.
-		COMPLIANCE: PI Data Archive SPNs exist and are assigned to the pinetmgr Service account. 
-		This makes Kerberos Authentication possible.  For more information, see "PI and Kerberos 
-		authentication" in the PI Live Library. 
+		COMPLIANCE: PI Data Archive SPNs exist and are assigned to the account running pinetmgr. 
+		Presently only local system is supported.  Correct SPN assignment makes Kerberos 
+		Authentication possible.  For more information, see "PI and Kerberos authentication" in 
+		the PI Live Library. 
 		https://livelibrary.osisoft.com/LiveLibrary/content/en/server-v7/GUID-531FFEC4-9BBB-4CA0-9CE7-7434B21EA06D 
 
 		AU30001 - PI AF Server Service Account Check
@@ -270,6 +266,37 @@ VALIDATION CHECKS AND COMPLIANCE CONDITIONS
 		more information, see:
 		https://msdn.microsoft.com/en-us/library/ms191188.aspx
 
+		AU40005 - SQL Server CLR Configuration Option Check
+		VALIDATION: verifies that SQL Server does not have CLR enabled. 
+		COMPLIANCE: disable the CLR option.  This option can be configured using 
+		the Policy-Based Management or the sp_configure stored procedure. For 
+		more information, see:
+		https://msdn.microsoft.com/en-us/library/ms191188.aspx
+
+		AU40006 - SQL Server Cross DB Ownership Chaining Option Check
+		VALIDATION: verifies that SQL Server does not have Cross DB Ownership 
+		Chaining enabled. 
+		COMPLIANCE: disable the Cross DB Ownership Chaining option.  This option 
+		can be configured using the Policy-Based Management or the sp_configure 
+		stored procedure. For more information, see:
+		https://msdn.microsoft.com/en-us/library/ms191188.aspx
+
+		AU40007 - SQL Server Remote Access Option Check
+		VALIDATION: verifies that SQL Server does not have Remote Access 
+		enabled. 
+		COMPLIANCE: disable the Remote Access option.  This option can 
+		be configured using the Policy-Based Management or the sp_configure 
+		stored procedure. For more information, see:
+		https://msdn.microsoft.com/en-us/library/ms191188.aspx
+
+		AU40008 - SQL Server sa Login Check
+		VALIDATION: verifies that SQL Server does not have the sa login enabled 
+		enabled. 
+		COMPLIANCE: disable the sa login.  This option can 
+		be configured using the Policy-Based Management or the sp_configure 
+		stored procedure. For more information, see:
+		https://msdn.microsoft.com/en-us/library/ms191188.aspx
+
 		AU50001 - Check for latest version of Coresight
 		VALIDATION: verifies PI Coresight version.
 		COMPLIANCE: upgrade to the latest version of PI Coresight.  For more information, 
@@ -285,7 +312,7 @@ VALIDATION CHECKS AND COMPLIANCE CONDITIONS
 		AU50003 - Coresight SSL check
 		VALIDATION: Checks whether SSL is enabled and enforced on the Coresight Web Site.
 		COMPLIANCE: A valid HTTPS binding is configured and only connections with SSL are allowed. The SSL certificate is issued by a Certificate Authority.
-		For more information, see "Configure Secure Sockets Layer (SSL) access" in the PI Live Library.
+		For more information, see "Configure Secure Sockets Layer (SSL) access" in the PI Live Library. 
 		https://livelibrary.osisoft.com/LiveLibrary/content/en/coresight-v7/GUID-CB46B733-264B-48D3-9033-73D16B4DBD3B
 
 		AU50004 - Coresight SPN check
@@ -312,23 +339,3 @@ CONTRIBUTE
 	If you encounter a bug, please submit it as an issue on the GitHub repo
 	or fix the bug and submit a pull request!
         https://github.com/osisoft/PI-System-Audit-Tools/issues
-        
-        
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
