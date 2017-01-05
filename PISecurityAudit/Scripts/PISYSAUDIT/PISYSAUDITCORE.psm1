@@ -1151,6 +1151,85 @@ param(
 	}	
 }
 
+function Test-WebAdministrationModuleAvailable
+{
+<#
+.SYNOPSIS
+(Core functionality) Checks for the WebAdministration module.
+.DESCRIPTION
+Validate that IIS module can be loaded and configuration data can be accessed.
+#>
+[CmdletBinding(DefaultParameterSetName="Default", SupportsShouldProcess=$false)]     
+param(
+		[parameter(Mandatory=$false, ParameterSetName = "Default")]
+		[alias("lc")]
+		[boolean]
+		$LocalComputer = $true,
+		[parameter(Mandatory=$false, ParameterSetName = "Default")]
+		[alias("rcn")]
+		[string]
+		$RemoteComputerName = "",
+		[parameter(Mandatory=$false, ParameterSetName = "Default")]
+		[alias("dbgl")]
+		[int]
+		$DBGLevel = 0)		
+BEGIN {}
+PROCESS
+{			
+	$fn = GetFunctionName
+	$value = $false
+	try
+	{
+		$query = 'Test-Path IIS:\'
+		$scriptBlock = [scriptblock]::create( $query )
+		# Execute the Get-ItemProperty cmdlet method locally or remotely via the Invoke-Command cmdlet
+		if($LocalComputer)		
+		{						
+			
+			# Import the WebAdministration module
+			Import-Module -Name "WebAdministration"		
+			
+			# Execute the command locally	
+			$value = Invoke-Command -ScriptBlock $scriptBlock			
+		}
+		else
+		{	
+					
+			# Establishing a new PS session on a remote computer		
+			$PSSession = New-PSSession -ComputerName $RemoteComputerName
+
+			# Importing WebAdministration module within the PS session
+			Invoke-Command -Session $PSSession -ScriptBlock {Import-Module WebAdministration}
+			
+			# Execute the command within a remote PS session
+			$value = Invoke-Command -Session $PSSession -ScriptBlock $scriptBlock
+			Remove-PSSession -ComputerName $RemoteComputerName
+		}
+	
+		# Return the value found.
+		return $value		
+	}
+	catch
+	{
+		# Return the error message.
+		$msgTemplate1 = "A problem occurred checking for IIS scripting tools: {0} from local machine."
+		$msgTemplate2 = "A problem occurred checking for IIS scripting tools: {0} from {1} machine."
+		if($LocalComputer)
+		{ $msg = [string]::Format($msgTemplate1, $_.Exception.Message) }
+		else
+		{ $msg = [string]::Format($msgTemplate2, $_.Exception.Message) }
+		Write-PISysAudit_LogMessage $msg "Error" $fn -eo $_				
+		return $null
+	}
+}
+
+END {}
+
+#***************************
+#End of exported function
+#***************************
+}
+
 function Test-PowerShellToolsForPISystemAvailable
 {
     # Check for availability of PowerShell Tools for the PI System
@@ -1893,7 +1972,8 @@ PROCESS
 		cls
 		
 		# Set the ShowUI flag
-		New-Variable -Name "PISysAuditShowUI" -Scope "Global" -Visibility "Public" -Value $ShowUI		
+		if($null -eq (Get-Variable "PISysAuditShowUI" -Scope "Global" -ErrorAction "SilentlyContinue").Value)
+		{ New-Variable -Name "PISysAuditShowUI" -Scope "Global" -Visibility "Public" -Value $true }		
 									
 		# Set an PISysAuditInitialized flag
 		New-Variable -Name "PISysAuditInitialized" -Scope "Global" -Visibility "Public" -Value $true				
@@ -2570,6 +2650,88 @@ END {}
 #***************************
 }
 
+function Get-PISysAudit_ParseDomainAndUserFromString
+{
+<#
+.SYNOPSIS
+(Core functionality) Parse the domain portion out of an account string.
+.DESCRIPTION
+Parse the domain portion out of an account string.  Supports UPN or Down-Level format
+#>
+[CmdletBinding(DefaultParameterSetName="Default", SupportsShouldProcess=$false)]     
+param(
+		[parameter(Mandatory=$true, Position=0, ParameterSetName = "Default")]
+		[alias("us")]
+		[string]
+		$UserString,
+		[parameter(Mandatory=$false, ParameterSetName = "Default")]
+		[alias("dbgl")]
+		[int]
+		$DBGLevel = 0)
+BEGIN {}
+PROCESS
+{
+	$fn = GetFunctionName
+	try
+	{
+		If ($UserString -eq "LocalSystem" -or $UserString -eq "NetworkService" `
+			-or $UserString -eq "NT AUTHORITY\LocalSystem" -or $UserString -eq "NT AUTHORITY\NetworkService" `
+			-or $UserString -eq "ApplicationPoolIdentity" `
+			-or $UserString -eq "NT SERVICE\AFService") 
+		{ 
+			$ServiceAccountDomain = 'MACHINEACCOUNT'
+			$parsingPosDL = $UserString.IndexOf('\')
+			If($parsingPosDL -ne -1 ) 
+			{
+				$ServiceAccount = $UserString.Substring($parsingPosDL+1)
+			}
+			Else 
+			{
+				$ServiceAccount = $UserString
+			}
+		}
+		Else{
+			# Parse as UPN or Down-Level Logon format
+			$parsingPosDL = $UserString.IndexOf('\') # DL
+			$parsingPosUPN = $UserString.IndexOf('@') # UPN
+			If($parsingPosDL -ne -1 ) 
+			{
+				$ServiceAccountDomain = $UserString.Substring(0,$parsingPosDL)
+				$ServiceAccount = $UserString.Substring($parsingPosDL+1)
+			}
+			ElseIf($parsingPosUPN -ne -1)
+			{
+				$ServiceAccountDomain = $UserString.Substring($parsingPosUPN+1)
+				$ServiceAccount = $UserString.Substring(0,$parsingPosUPN)
+			}
+			Else
+			{
+				$ServiceAccountDomain = $null
+				$ServiceAccount = $UserString
+			}
+		}
+
+		$AccountObject = New-Object PSCustomObject					
+		Add-Member -InputObject $AccountObject -MemberType NoteProperty -Name "UserName" -Value $ServiceAccount
+		Add-Member -InputObject $AccountObject -MemberType NoteProperty -Name "Domain" -Value $ServiceAccountDomain	
+
+		return $AccountObject			
+	}
+	catch
+	{
+		# Return the error message.				
+		Write-PISysAudit_LogMessage "Unable to determine account domain." "Error" $fn -eo $_
+		return $null
+	}
+}
+
+END {}
+
+#***************************
+#End of exported function
+#***************************
+}
+
 function Get-PISysAudit_ServiceState
 {
 <#
@@ -2926,6 +3088,85 @@ END {}
 #***************************
 }
 
+Function Get-PISysAudit_KnownServers
+{
+<#
+.SYNOPSIS
+(Core functionality) Get the servers in the PI Data Archive or PI AF Server KST.
+.DESCRIPTION
+Get the servers in the PI Data Archive or PI AF Server KST.
+#>
+	param(
+		[parameter(Mandatory=$true, Position=0, ParameterSetName = "Default")]
+		[alias("lc")]
+		[boolean]
+		$LocalComputer,
+		[parameter(Mandatory=$true, Position=1, ParameterSetName = "Default")]		
+		[alias("rcn")]
+		[string]
+		$RemoteComputerName,
+		[parameter(Mandatory=$false, ParameterSetName = "Default")]
+		[alias("st")]
+		[ValidateSet('PIServer','AFServer')]
+		[string] 
+		$ServerType,
+		[parameter(Mandatory=$false, ParameterSetName = "Default")]
+		[alias("dbgl")]
+		[int]
+		$DBGLevel = 0	
+	)	
+
+	$fn = GetFunctionName
+
+	If($ServerType -eq 'PIServer')
+	{
+		# Get PI Servers
+		$regpathKST = 'HKLM:\SOFTWARE\PISystem\PI-SDK\1.0\ServerHandles'
+		if($LocalComputer)
+		{
+			$KnownServers = Get-ChildItem $regpathKST | ForEach-Object {Get-ItemProperty $_.pspath} | where-object {$_.path} | Foreach-Object {$_.path}
+		}
+		Else
+		{
+			$scriptBlockCmdTemplate = "Get-ChildItem `"{0}`" | ForEach-Object [ Get-ItemProperty `$_.pspath ] | where-object [ `$_.path ] | Foreach-Object [ `$_.path ]"
+			$scriptBlockCmd = [string]::Format($scriptBlockCmdTemplate, $regpathKST)
+			$scriptBlockCmd = ($scriptBlockCmd.Replace("[", "{")).Replace("]", "}")			
+			$scriptBlock = [scriptblock]::create( $scriptBlockCmd )													
+			$KnownServers = Invoke-Command -ComputerName $RemoteComputerName -ScriptBlock $scriptBlock 
+		}
+	}
+	Else
+	{
+		# Get AF Servers
+		$programDataWebServer = Get-PISysAudit_EnvVariable "ProgramData" -lc $LocalComputer -rcn $RemoteComputerName  -Target Process
+		$afsdkConfigPathWebServer = "$programDataWebServer\OSIsoft\AF\AFSDK.config"
+		if($LocalComputer)
+		{
+			$AFSDK = Get-Content -Path $afsdkConfigPathWebServer | Out-String
+		}
+		Else
+		{
+			$scriptBlockCmdTemplate = "Get-Content -Path ""{0}"" | Out-String"
+			$scriptBlockCmd = [string]::Format($scriptBlockCmdTemplate, $afsdkConfigPathWebServer)									
+			
+			# Verbose only if Debug Level is 2+
+			$msgTemplate = "Remote command to send to {0} is: {1}"
+			$msg = [string]::Format($msgTemplate, $RemoteComputerName, $scriptBlockCmd)
+			Write-PISysAudit_LogMessage $msg "debug" $fn -dbgl $DBGLevel -rdbgl 2
+			
+			$scriptBlock = [scriptblock]::create( $scriptBlockCmd )
+			$AFSDK = Invoke-Command -ComputerName $RemoteComputerName -ScriptBlock $scriptBlock
+		}
+		$KnownServers = [regex]::Matches($AFSDK, 'host=\"([^\"]*)')
+	}
+
+	$msgTemplate = "Known servers found: {0}"
+	$msg = [string]::Format($msgTemplate, $KnownServers)
+	Write-PISysAudit_LogMessage $msg "debug" $fn -dbgl $DBGLevel -rdbgl 2
+
+	return $KnownServers
+}
+
 function Get-PISysAudit_CheckPrivilege
 {
 <#
@@ -3113,7 +3354,7 @@ PROCESS
 		else
 		{																		
 			$PIHome_path = Get-PISysAudit_EnvVariable "PIHOME" -lc $false -rcn $RemoteComputerName
-			# Set the PIPC\log folder (64 bit).
+			# Set the PIPC\dat folder (64 bit).
 			$scriptTempFilesPath = PathConcat -ParentPath $PIHome_path -ChildPath "dat"		                                       						                                   					                                      
 			# Define the arguments required by the afdiag.exe command						
 			$argListTemplate = "'/ExeFile:`"{0}`"'"	
@@ -3600,55 +3841,27 @@ PROCESS
 		$hostname = Get-PISysAudit_RegistryKeyValue "HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName" "ComputerName" -lc $LocalComputer -rcn $RemoteComputerName -dbgl $DBGLevel
 
 		# Build FQDN using hostname and domain strings.
-		$fqdn = $hostname + "." + $machineDomain
+		$fqdn = $hostname + "." + $MachineDomain
 
-		# SPN check is not done for PI Coresight.
-		If ( $ServiceName -ne "coresight" -and $ServiceName -ne "coresight_custom") 
-		{
-			# Get the Service account
-			$svcacc = Get-PISysAudit_ServiceLogOnAccount $ServiceName -lc $LocalComputer -rcn $RemoteComputerName -dbgl $DBGLevel
-		}
-		
 		# SPN check is done for PI Coresight using a custom host header.
-		ElseIf ( $ServiceName -ne "coresight" ) 
+		If ( $ServiceName -eq "coresight_custom" ) 
 		{ 
 			# Pass the Coresight AppPool identity as the service account.
 			$svcacc = $csappPool
-			
-				# Distinguish between Domain/Virtual account and Machine Accounts.
-				If ($svcacc.Contains("\")) 
-				{
-					# If NT Service account is used, use the hostname when verifying the SPN assignment.
-					If ($svcacc.ToLower().Contains("nt service")) 
-					{ 
-						$svcaccMod = $hostname 
-					} 
-					# Else use the username to verify the SPN assignment.
-					Else 
-					{ 
-						$svcaccMod = $svcacc
-						# If it's a local account, then there cannot be an SPN assigned.
-						if($svcaccMod.Split("\")[0] -eq "."){return $false}
-					} 
-				}
-				# For machine accounts such as Network Service or Local System, use the hostname when verifying the SPN assignment.
-				Else 
-				{ 
-					$svcaccMod = $hostname 
-				}
-
-				# Take Custom header information and create its short and long version.
-				If ($CoresightHeader -match "\.") 
-				{
-					$csCHeaderLong = $CoresightHeader
-					$pos = $CoresightHeader.IndexOf(".")
-					$csCHeaderShort = $CoresightHeader.Substring(0, $pos)
-				} 
-				Else 
-				{ 
-					$csCHeaderShort = $CoresightHeader
-					$csCHeaderLong = $CoresightHeader + "." + $MachineDomain
-				}
+			$svcaccParsed = Get-PISysAudit_ParseDomainAndUserFromString -UserString $svcacc -DBGLevel $DBGLevel
+				
+			# Take Custom header information and create its short and long version.
+			If ($CoresightHeader -match "\.") 
+			{
+				$csCustomHeaderLong = $CoresightHeader
+				$pos = $CoresightHeader.IndexOf(".")
+				$csCustomHeaderShort = $CoresightHeader.Substring(0, $pos)
+			} 
+			Else 
+			{ 
+				$csCustomHeaderShort = $CoresightHeader
+				$csCustomHeaderLong = $CoresightHeader + "." + $MachineDomain
+			}
 
 			# Deal with the custom header - run nslookup and capture the result.
 			$AliasTypeCheck = nslookup $CoresightHeader
@@ -3658,129 +3871,67 @@ PROCESS
 			{ 
 			# Dealing with Alias (CNAME). 
 
-			$spnCheck = $(setspn -l $svcaccMod)
-
 			# Verify hostnane AND FQDN SPNs are assigned to the service account.
 			#
 			# In case of Alias (CNAME), SPNs should exist for both short and fully qualified name of oth the Alias (CNAME)
 			# ..and for the machine the Alias (CNAME) is pointing to. Overall, there should be 4 SPNs.
 			#
 			# With Host (A) entries, SPNs are needed only for the short and fully qualified names.
-
-			$spnCounter = 0
 			
 			$hostnameSPN = $($serviceType.ToLower() + "/" + $hostname.ToLower())
 			$fqdnSPN = $($serviceType.ToLower() + "/" + $fqdn.ToLower())
-			$csCHeaderSPN = $($serviceType.ToLower() + "/" + $csCHeaderShort.ToLower())
-			$csCHeaderLongSPN = $($serviceType.ToLower() + "/" + $csCHeaderLong.ToLower())
+			$csCustomHeaderSPN = $($serviceType.ToLower() + "/" + $csCustomHeaderShort.ToLower())
+			$csCustomHeaderLongSPN = $($serviceType.ToLower() + "/" + $csCustomHeaderLong.ToLower())
 			
-			foreach($line in $spnCheck)
-			{
-				switch($line.ToLower().Trim())
-				{
-					$csCHeaderSPN {$spnCounter++; break}
-					$csCHeaderLongSPN {$spnCounter++; break}
-					$hostnameSPN {$spnCounter++; break}
-					$fqdnSPN {$spnCounter++; break}
-					default {break}
-				}
-			}
-
-			# FUTURE ENHANCEMENT:
-			# Return details to improve messaging in case of failure.
-			If ($spnCounter -eq 4) { $result = $true } 
-			Else { $result =  $false }
-		
-			return $result		
-			
-			} 
-			
+			$result = Test-PISysAudit_ServicePrincipalName -HostName $hostname -MachineDomain $MachineDomain `
+															-SPNShort $hostnameSPN -SPNLong $fqdnSPN `
+															-SPNShortAlias $csCustomHeaderSPN -SPNLongAlias $csCustomHeaderLongSPN `
+															-TargetAccountName $svcaccParsed.UserName -ServiceAccountDomain $svcaccParsed.Domain -DBGLevel $DBGLevel
+						
+			return $result			
+			} 			
 			Else 
 			{ 
 			# Host (A) 
+			
+			$csCustomHeaderSPN = $($serviceType.ToLower() + "/" + $csCustomHeaderShort.ToLower())
+			$csCustomHeaderLongSPN = $($serviceType.ToLower() + "/" + $csCustomHeaderLong.ToLower())
 
-			$spnCheck = $(setspn -l $svcaccMod) 
+			$result = Test-PISysAudit_ServicePrincipalName -HostName $hostname -MachineDomain $MachineDomain `
+															-SPNShort $csCustomHeaderSPN -SPNLong $csCustomHeaderLongSPN `
+															-TargetAccountName $svcaccParsed.UserName -TargetDomain $svcaccParsed.Domain -DBGLevel $DBGLevel
 
-			# Verify hostnane AND FQDN SPNs are assigned to the service account.
-			$spnCounter = 0
-			$csCHeaderSPN = $($serviceType.ToLower() + "/" + $csCHeaderShort.ToLower())
-			$csCHeaderLongSPN = $($serviceType.ToLower() + "/" + $csCHeaderLong.ToLower())
-			# Loop through SPNs, trimming and ensure all lower for comparison
-			foreach($line in $spnCheck)
-			{
-				switch($line.ToLower().Trim())
-				{
-					$csCHeaderSPN {$spnCounter++; break}
-					$csCHeaderLongSPN {$spnCounter++; break}
-					default {break}
-				}
-			}
-
-			# FUTURE ENHANCEMENT:
-			# Return details to improve messaging in case of failure.
-			If ($spnCounter -eq 2) { $result = $true } 
-			Else { $result =  $false }
-		
 			return $result
-			
-			
 			}
-		}
-		# SPN check is done for PI Coresight without custom headers.
+		}	
+		# SPN Check is done for PI Coresight or other service
 		Else
 		{
-			# In case of PI Coresight, the AppPool account is used in the SPN check.
-			$svcacc = $csappPool
-		}
-
-
-		# Proceed with checking SPN for Coresight or non-IIS app (PI/AF).
-		# Distinguish between Domain/Virtual account and Machine Accounts.
-		If ($svcacc.Contains("\")) 
-		{
-			# If NT Service account is used, use the hostname when verifying the SPN assignment.
-			If ($svcacc.ToLower().Contains("nt service")) 
-			{ 
-				$svcaccMod = $hostname 
-			} 
-			# Else use the username to verify the SPN assignment.
-			Else 
-			{ 
-				$svcaccMod = $svcacc
-				# If it's a local account, then there cannot be an SPN assigned.
-				if($svcaccMod.Split("\")[0] -eq "."){return $false}
-			} 
-		}
-		# For machine accounts such as Network Service or Local System, use the hostname when verifying the SPN assignment.
-		Else 
-		{ 
-			$svcaccMod = $hostname 
-		}
-
-		# Run setspn
-		$spnCheck = $(setspn -l $svcaccMod)
-
-		# Verify hostnane AND FQDN SPNs are assigned to the service account.
-		$spnCounter = 0
-		$hostnameSPN = $($serviceType.ToLower() + "/" + $hostname.ToLower())
-		$fqdnSPN = $($serviceType.ToLower() + "/" + $fqdn.ToLower())
-		# Loop through SPNs, trimming and ensure all lower for comparison
-		foreach($line in $spnCheck)
-		{
-			switch($line.ToLower().Trim())
+			# SPN check is done for PI Coresight without custom headers.
+			If ( $ServiceName -eq "coresight" )
 			{
-				$hostnameSPN {$spnCounter++; break}
-				$fqdnSPN {$spnCounter++; break}
-				default {break}
+				# In case of PI Coresight, the AppPool account is used in the SPN check.
+				$svcacc = $csappPool
 			}
-		}
+			# SPN check is not done for PI Coresight.
+			Else
+			{
+				# Get the Service account
+				$svcacc = Get-PISysAudit_ServiceLogOnAccount $ServiceName -lc $LocalComputer -rcn $RemoteComputerName -dbgl $DBGLevel
+			}
+			$svcaccParsed = Get-PISysAudit_ParseDomainAndUserFromString -UserString $svcacc -DBGLevel $DBGLevel
 
-		# FUTURE ENHANCEMENT:
-		# Return details to improve messaging in case of failure.
-		If ($spnCounter -eq 2) { $result = $true } 
-		Else { $result =  $false }
-		
-		return $result
+			# Proceed with checking SPN for Coresight or non-IIS app (PI/AF).
+			# Distinguish between Domain/Virtual account and Machine Accounts.
+			$hostnameSPN = $($serviceType.ToLower() + "/" + $hostname.ToLower())
+			$fqdnSPN = $($serviceType.ToLower() + "/" + $fqdn.ToLower())
+
+			$result = Test-PISysAudit_ServicePrincipalName -HostName $hostname -MachineDomain $MachineDomain `
+															-SPNShort $hostnameSPN -SPNLong $fqdnSPN `
+															-TargetAccountName $svcaccParsed.UserName -TargetDomain $svcaccParsed.Domain -DBGLevel $DBGLevel
+
+			return $result
+		}
 	}
 	catch
 	{
@@ -3791,6 +3942,124 @@ PROCESS
 	}
 }
 
+END {}
+
+#***************************
+#End of exported function
+#***************************
+}
+
+function Test-PISysAudit_ServicePrincipalName
+{
+<#
+.SYNOPSIS
+(Core functionality) Perform a SQL query against a local/remote computer using an ADO.NET connection.
+.DESCRIPTION
+Perform a SQL query against a local/remote computer using an ADO.NET connection.
+#>
+[CmdletBinding(DefaultParameterSetName="Default", SupportsShouldProcess=$false)]     
+param(
+		[parameter(Mandatory=$true, ParameterSetName = "Default")]		
+		[alias("host")]
+		[string]
+		$HostName,
+		[parameter(Mandatory=$true, ParameterSetName = "Default")]		
+		[string]
+		$MachineDomain,
+		[parameter(Mandatory=$true, ParameterSetName = "Default")]		
+		[alias("SPNS")]
+		[string]
+		$SPNShort,
+		[parameter(Mandatory=$false, ParameterSetName = "Default")]
+		[alias("SPNL")]
+		[string]
+		$SPNLong,
+		[parameter(Mandatory=$false, ParameterSetName = "Default")]		
+		[alias("SPNSA")]
+		[string]
+		$SPNShortAlias="",
+		[parameter(Mandatory=$false, ParameterSetName = "Default")]
+		[alias("SPNLA")]
+		[string]
+		$SPNLongAlias="",
+		[parameter(Mandatory=$true, ParameterSetName = "Default")]		
+		[alias("TargetAccountName")]
+		[string]
+		$strSPNtargetAccount,
+		[parameter(Mandatory=$false, ParameterSetName = "Default")]		
+		[alias("TargetDomain")]
+		[string]
+		$strSPNtargetDomain=".",
+		[parameter(Mandatory=$false, ParameterSetName = "Default")]
+		[alias("dbgl")]
+		[int]
+		$DBGLevel = 0	)
+BEGIN {}
+PROCESS		
+{		
+	$fn = GetFunctionName
+	$blnAlias = $false
+	try
+	{
+		$blnAlias = $SPNShortAlias -ne "" -and $SPNLongAlias -ne ""
+		
+		# Define user syntax for SPN command
+		If($strSPNtargetDomain -eq 'MACHINEACCOUNT') # Use the hostname when a machine account is identified
+		{
+			$accountNane = $MachineDomain + '\' + $HostName + '$'
+		}
+		ElseIf($strSPNtargetDomain -eq '.') # Local account detected means SPN call will fail
+		{ return $false }
+		Else # Use parsed name
+		{
+			$accountNane = $strSPNtargetDomain + '\' + $strSPNtargetAccount
+		}
+		
+		# Run setspn
+		$spnCheck = $(setspn -l $accountNane)
+		
+		# Loop through SPNs, trimming and ensure all lower for comparison
+		$spnCounter = 0
+		foreach($line in $spnCheck)
+		{		
+			If($blnAlias){
+				switch($line.ToLower().Trim())
+				{
+					$SPNShort {$spnCounter++; break}
+					$SPNLong {$spnCounter++; break}
+					$SPNShortAlias {$spnCounter++; break}
+					$SPNLongAlias {$spnCounter++; break}
+					default {break}
+				}
+			}
+			Else
+			{
+				switch($line.ToLower().Trim())
+				{
+					$SPNShort {$spnCounter++; break}
+					$SPNLong {$spnCounter++; break}
+					default {break}
+				}
+			}	
+		}
+
+		# Return details to improve messaging in case of failure.
+		If ($blnAlias -and $spnCounter -eq 4) { $result = $true } 
+		ElseIf ($spnCounter -eq 2) { $result = $true }
+		Else 
+		{ 
+			$result =  $false 
+		}
+		return $result
+	}
+	catch
+	{
+		# Return the error message.
+		$msg = "A problem occurred using setspn.exe"	
+		Write-PISysAudit_LogMessage $msg "Error" $fn -eo $_
+		return $false
+	}
+}
 END {}
 
 #***************************
@@ -5015,11 +5284,10 @@ PROCESS
 		# Initialize.
 		$ComputerParamsTable = @{}
 		
-		# This means an audit on the local computer is required
+		# This means an audit on the local computer is required only PI Data Archive and PI AF Server are checked by default.
+		# SQL Server checks ommitted by default as SQL Server will often require an instancename
 		$ComputerParamsTable = New-PISysAuditComputerParams $ComputerParamsTable "localhost" "PIServer"
-		$ComputerParamsTable = New-PISysAuditComputerParams $ComputerParamsTable "localhost" "PIAFServer"
-		$ComputerParamsTable = New-PISysAuditComputerParams $ComputerParamsTable "localhost" "SQLServer"
-		$ComputerParamsTable = New-PISysAuditComputerParams $ComputerParamsTable "localhost" "PICoresightServer"		
+		$ComputerParamsTable = New-PISysAuditComputerParams $ComputerParamsTable "localhost" "PIAFServer"	
 	}
 	
 	# ............................................................................................................
@@ -5142,6 +5410,7 @@ Export-ModuleMember Get-PISysAudit_EnvVariable
 Export-ModuleMember Get-PISysAudit_RegistryKeyValue
 Export-ModuleMember Get-PISysAudit_TestRegistryKey
 Export-ModuleMember Get-PISysAudit_ServiceLogOnAccount
+Export-ModuleMember Get-PISysAudit_ParseDomainAndUserFromString
 Export-ModuleMember Get-PISysAudit_ServiceState
 Export-ModuleMember Get-PISysAudit_CheckPrivilege
 Export-ModuleMember Get-PISysAudit_InstalledComponents
@@ -5149,6 +5418,8 @@ Export-ModuleMember Get-PISysAudit_InstalledKBs
 Export-ModuleMember Get-PISysAudit_InstalledWin32Feature
 Export-ModuleMember Get-PISysAudit_FirewallState
 Export-ModuleMember Get-PISysAudit_AppLockerState
+Export-ModuleMember Get-PISysAudit_KnownServers
+Export-ModuleMember Test-PISysAudit_ServicePrincipalName
 Export-ModuleMember Invoke-PISysAudit_AFDiagCommand
 Export-ModuleMember Invoke-PISysAudit_PIConfigScript
 Export-ModuleMember Invoke-PISysAudit_PIVersionCommand
@@ -5168,6 +5439,7 @@ Export-ModuleMember -Alias pisysauditparams
 Export-ModuleMember -Alias piaudit
 Export-ModuleMember -Alias pwdondisk
 Export-ModuleMember Test-PowerShellToolsForPISystemAvailable
+Export-ModuleMember Test-WebAdministrationModuleAvailable
 # </Do not remove>
 
 # ........................................................................

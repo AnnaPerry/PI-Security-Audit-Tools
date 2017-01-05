@@ -61,268 +61,71 @@ PROCESS
 END { return $outputFileContent }
 }	
 
-function Get-PISecConfig_FunctionsFromLibrary
+function PISecConfig_ExportData
 {
 <#  
 .SYNOPSIS
-Get functions from machine library.
+Get security configuration data
 #>
-	[System.Collections.HashTable]$listOfFunctions = @{}	
-	$listOfFunctions.Add("PISecConfig_ExportPIDBSecurity", 1)
-	$listOfFunctions.Add("PISecConfig_ExportPIFirewall", 1)
-	$listOfFunctions.Add("PISecConfig_ExportPIUsers", 1)
-    $listOfFunctions.Add("PISecConfig_ExportPIGroups", 1)
-	$listOfFunctions.Add("PISecConfig_ExportPIIdentities", 1)
-	$listOfFunctions.Add("PISecConfig_ExportPIMappings", 1)
-	$listOfFunctions.Add("PISecConfig_ExportPITrusts", 1)
-	$listOfFunctions.Add("PISecConfig_ExportPINetManagerStats", 1)
-	$listOfFunctions.Add("PISecConfig_ExportPIMessageLogs", 1)
-	return $listOfFunctions		
-}
-
-function PISecConfig_ExportPIDBSecurity
-{
-<#  
-.SYNOPSIS
-Export Database Security to CSV
-#>   
 param(
 		[parameter(Mandatory=$true, ParameterSetName = "Default")]
-		[alias("pida")]
-		[object] $PIDataArchiveConnection)		
-	
+		[object] $PIDataArchiveConnection,
+		[parameter(Mandatory=$true, ParameterSetName = "Default")]
+		[string] $DataItem,
+		[parameter(Mandatory=$false, ParameterSetName = "Default")]
+		[int] $MaxResults = 1000)
+		
 	$fn = GetFunctionName
 	try
 	{		
-		$outputFileContent = Get-PIDatabaseSecurity -Connection $PIDataArchiveConnection `
+		switch ($DataItem)
+		{
+			"PIDatabaseSecurity" { 
+				$outputFileContent = Get-PIDatabaseSecurity -Connection $PIDataArchiveConnection `
 										| Select-Object TableName, Security | Sort-Object -Property Tablename `
 										| Foreach-Object { $_.Security = $_.Security.ToString(); Write-Output $_ } `
-										| ConvertSelectionToPSObject		 																	
-		
-		return (NewConfigDataItem "PIDatabaseSecurity" $outputFileContent)	
-	}
-	catch
-	{ 
-		Write-Output $("A problem occurred during " + $fn + ": " + $_.Exception.Message)
-	}								
-}
-
-function PISecConfig_ExportPIFirewall
-{
-<#  
-.SYNOPSIS
-Export PI Firewall to CSV
-#>
-param(
-		[parameter(Mandatory=$true, ParameterSetName = "Default")]
-		[alias("pida")]
-		[object] $PIDataArchiveConnection)	
-	
-	$fn = GetFunctionName
-	try
-	{		
-		$outputFileContent = Get-PIFirewall -Connection $PIDataArchiveConnection `
-									| Select-Object Hostmask, Access | ConvertSelectionToPSObject
-															
-		return (NewConfigDataItem "PIFirewall" $outputFileContent)	
-	}
-	catch
-	{ 
-		Write-Output $("A problem occurred during " + $fn + ": " + $_.Exception.Message)
-	}												
-}
-
-function PISecConfig_ExportPIUsers
-{
-<#  
-.SYNOPSIS
-Export PI Users to CSV
-#>
-param(
-		[parameter(Mandatory=$true, ParameterSetName = "Default")]
-		[alias("pida")]
-		[object] $PIDataArchiveConnection)	
-		
-	$fn = GetFunctionName
-	try
-	{		
-		$outputFileContent = Get-PIUser -Connection $PIDataArchiveConnection `
-									| Select-Object Name, Groups | ConvertSelectionToPSObject
-																	
-		return (NewConfigDataItem "PIUser" $outputFileContent)	
-	}
-	catch
-	{ 
-		Write-Output $("A problem occurred during " + $fn + ": " + $_.Exception.Message)
-	}													
-
-}
-
-function PISecConfig_ExportPIGroups
-{
-<#  
-.SYNOPSIS
-Export PI Groups to CSV
-#>
-param(
-		[parameter(Mandatory=$true, ParameterSetName = "Default")]
-		[alias("pida")]
-		[object] $PIDataArchiveConnection)	
-		
-	$fn = GetFunctionName
-	try
-	{		
-		$outputFileContent = Get-PIGroup -Connection $PIDataArchiveConnection `
-									| Select-Object Name, Users | ConvertSelectionToPSObject
-																		
-		return (NewConfigDataItem "PIGroups" $outputFileContent)	
-	}
-	catch
-	{ 
-		Write-Output $("A problem occurred during " + $fn + ": " + $_.Exception.Message)
-	}													
-
-}
-
-function PISecConfig_ExportPIIdentities
-{
-<#  
-.SYNOPSIS
-Export PI Identities to CSV
-#>
-param(
-		[parameter(Mandatory=$true, ParameterSetName = "Default")]
-		[alias("pida")]
-		[object] $PIDataArchiveConnection)	
-		
-	$fn = GetFunctionName
-	try
-	{		
-		$outputFileContent = Get-PIIdentity -Connection $PIDataArchiveConnection  `
+										| ConvertSelectionToPSObject 
+				break
+			}
+			"PIFirewall" { $outputFileContent = Get-PIFirewall -Connection $PIDataArchiveConnection | Select-Object Hostmask, Access | ConvertSelectionToPSObject; break }
+			"PIUsers" { $outputFileContent = Get-PIUser -Connection $PIDataArchiveConnection | Select-Object Name, Groups | ConvertSelectionToPSObject; break }
+			"PIGroups" { $outputFileContent = Get-PIGroup -Connection $PIDataArchiveConnection | Select-Object Name, Users | ConvertSelectionToPSObject; break }
+			"PIIdentities" { 
+				$outputFileContent = Get-PIIdentity -Connection $PIDataArchiveConnection  `
                             | Select-Object Name, ReadOnlyFlags `
                             | Foreach-Object { $_.ReadOnlyFlags = $_.ReadOnlyFlags.ToString().Replace(',',';'); Write-Output $_ } `
-							| ConvertSelectionToPSObject
-																	
-		return (NewConfigDataItem "PIIdentities" $outputFileContent)	
-	}
-	catch
-	{ 
-		Write-Output $("A problem occurred during " + $fn + ": " + $_.Exception.Message)
-	}													
-
-}
-
-function PISecConfig_ExportPIMappings
-{
-<#  
-.SYNOPSIS
-Export PI Mappings to CSV
-#>
-param(
-		[parameter(Mandatory=$true, ParameterSetName = "Default")]
-		[alias("pida")]
-		[object] $PIDataArchiveConnection)	
-		
-	$fn = GetFunctionName
-	try
-	{		
-		$outputFileContent = Get-PIMapping -Connection $PIDataArchiveConnection  `
-                            | Select-Object Identity, PrincipalName | ConvertSelectionToPSObject
-																	
-		return (NewConfigDataItem "PIMappings" $outputFileContent)	
-	}
-	catch
-	{ 
-		Write-Output $("A problem occurred during " + $fn + ": " + $_.Exception.Message)
-	}												
-
-}
-
-function PISecConfig_ExportPITrusts
-{
-<#  
-.SYNOPSIS
-Export PI Trusts to CSV
-#>
-param(
-		[parameter(Mandatory=$true, ParameterSetName = "Default")]
-		[alias("pida")]
-		[object] $PIDataArchiveConnection)	
-		
-	$fn = GetFunctionName
-	try
-	{		
-		$outputFileContent = Get-PITrust -Connection $PIDataArchiveConnection  `
-                            | Select-Object Name, Identity, Domain, OSUser, ApplicationName, NetworkHost, IPAddress, NetMask, IsEnabled `
-							| ConvertSelectionToPSObject
-		
-		return (NewConfigDataItem "PITrusts" $outputFileContent)	
-	}
-	catch
-	{ 
-		Write-Output $("A problem occurred during " + $fn + ": " + $_.Exception.Message)
-	}													
-
-}
-
-function PISecConfig_ExportPINetManagerStats
-{
-<#  
-.SYNOPSIS
-Export PI Network Manager Statistics to CSV
-#>
-param(
-		[parameter(Mandatory=$true, ParameterSetName = "Default")]
-		[alias("pida")]
-		[object] $PIDataArchiveConnection)	
-		
-	$fn = GetFunctionName
-	try
-	{		
-		$outputFileContentRaw = Get-PIConnectionStatistics -Connection $PIDataArchiveConnection
-		# Note: ConvertSelectionToPSObject is not used for NetManStats because attributes are dictionary entries and it is simpler to convert them directly to NoteProperties
-		# while transposing to work with native export to CSV
-		$outputFileContent = @()
-		foreach ($row in $outputFileContentRaw)
-		{
-			$entry = New-Object PSObject 
-			for ($index=0; $index -lt $row.Count; $index++)
-			{
-				$entry | Add-Member -MemberType NoteProperty -Name $row.Name[$index] -Value $row.Value[$index]
+							| ConvertSelectionToPSObject 
+				break
 			}
-			$outputFileContent += $entry
+			"PIMappings" { $outputFileContent = Get-PIMapping -Connection $PIDataArchiveConnection	| Select-Object Identity, PrincipalName | ConvertSelectionToPSObject; break }
+			"PIMessages" { $outputFileContent = Get-PIMessage -Connection $PIDataArchiveConnection -Starttime $(Get-Date).AddMonths(-1) -Endtime $(Get-Date) -SeverityType Warning -Count $MaxResults | Select * | ConvertSelectionToPSObject; break }
+			"PINetManagerStats" {
+				$outputFileContentRaw = Get-PIConnectionStatistics -Connection $PIDataArchiveConnection
+				# Note: ConvertSelectionToPSObject is not used for NetManStats because attributes are dictionary entries and it is simpler to convert them directly to NoteProperties
+				# while transposing to work with native export to CSV
+				$outputFileContent = @()
+				foreach ($row in $outputFileContentRaw)
+				{
+					$entry = New-Object PSObject 
+					for ($index=0; $index -lt $row.Count; $index++)
+					{
+						$entry | Add-Member -MemberType NoteProperty -Name $row.Name[$index] -Value $row.Value[$index]
+					}
+					$outputFileContent += $entry
+				}
+				break
+			}
+			"PITrusts" { $outputFileContent = Get-PITrust -Connection $PIDataArchiveConnection | Select-Object Name, Identity, Domain, OSUser, ApplicationName, NetworkHost, IPAddress, NetMask, IsEnabled | ConvertSelectionToPSObject; break }
 		}
-														
-		return (NewConfigDataItem "PINetManagerStats" $outputFileContent)	
+		if($outputFileContent.Count -ge $MaxResults){
+			Write-Warning $("Max result limit of " + $MaxResults.ToString() + " reached for " + $dataItem + ".  " + $fn)
+		}
+		return (NewConfigDataItem $DataItem $outputFileContent)		
 	}
 	catch
 	{ 					
-		Write-Output $("A problem occurred during " + $fn + ": " + $_.Exception.Message)
-	}													
-}
-
-function PISecConfig_ExportPIMessageLogs
-{
-<#  
-.SYNOPSIS
-Export PI Message Logs of severity Warning or above for the past month.
-#>
-param(
-		[parameter(Mandatory=$true, ParameterSetName = "Default")]
-		[alias("pida")]
-		[object] $PIDataArchiveConnection)
-		
-	$fn = GetFunctionName
-	try
-	{		
-		$outputFileContent = Get-PIMessage -Connection $PIDataArchiveConnection -Starttime $(Get-Date).AddMonths(-1) -Endtime $(Get-Date) -SeverityType Warning `
-									| Select * | ConvertSelectionToPSObject
-														
-		return (NewConfigDataItem "PIMessages" $outputFileContent)	
-	}
-	catch
-	{ 					
-		Write-Output $("A problem occurred during " + $fn + ": " + $_.Exception.Message)
+		Write-Output $("A problem occurred on " + $dataItem + ".  " + $fn + ": " + $_.Exception.Message)
+		return $null
 	}													
 }
 
@@ -363,18 +166,17 @@ https://pisquare.osisoft.com
 param(
 		[parameter(Mandatory=$true, ParameterSetName = "Default")]
 		[alias("pida")]
-		[string] $PIDataArchiveComputerName)	
-BEGIN {}
-PROCESS 
-{
+		[string] $PIDataArchiveComputerName,
+		[parameter(Mandatory=$false, ParameterSetName = "Default")]
+		[int] $MaxResults = 1000
+	)	
+
 		Test-PowerShellToolsForPISystemAvailable
 		if(!$global:ArePowerShellToolsAvailable)
 		{ 
 			Write-Output "PowerShell Tools for the PI System are required for export functionality. Exiting..." 
 			break
 		}
-		# Get the list of functions to execute.
-		$listOfFunctions = Get-PISecConfig_FunctionsFromLibrary
 		# Connect to PI Data Archive
 		$PIDataArchiveConnection = Connect-PIDataArchive -PIDataArchiveMachineName $PIDataArchiveComputerName
 		# Set export folder
@@ -382,15 +184,15 @@ PROCESS
 		$exportFolderPath = PathConcat -ParentPath $exportFolderPathRoot -ChildPath $PIDataArchiveComputerName
 		if (!(Test-Path $exportFolderPath)){ New-Item $exportFolderPath -type directory }
 		
-		foreach($function in $listOfFunctions.GetEnumerator())
+		$listOfDataItems = @('PIDatabaseSecurity','PIFirewall','PIUsers','PIGroups','PIIdentities','PIMappings','PITrusts','PINetManagerStats','PIMessages')
+		foreach($dataItem in $listOfDataItems)
 		{
 			$PISecConfigDataItem = $null
-			$PISecConfigDataItem = & $function.Name -pida $PIDataArchiveConnection
-			$exportFilePath = $exportFolderPath + "\" + $PISecConfigDataItem.FileName + ".csv"
-			$PISecConfigDataItem.FileContent | Export-Csv -Path $exportFilePath -Encoding ASCII -NoTypeInformation
+			$PISecConfigDataItem = PISecConfig_ExportData -PIDataArchiveConnection $PIDataArchiveConnection -DataItem $dataItem -MaxResults $MaxResults
+			if($null -ne $PISecConfigDataItem.FileContent) { $PISecConfigDataItem.FileContent | Export-Csv -Path $($exportFolderPath + "\" + $PISecConfigDataItem.FileName + ".csv") -Encoding ASCII -NoTypeInformation }
+			else { Write-Warning ("No result returned for " + $dataItem) }
 		}
-}
-END{}
+
 }
 
 # ........................................................................

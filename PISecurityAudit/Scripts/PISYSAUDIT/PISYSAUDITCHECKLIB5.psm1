@@ -599,7 +599,7 @@ PROCESS
 		# Coresight is running under a machine account.
 		Else 
 		{ 
-			$csappPool = $hostname 
+			$csappPool = $global:CSAppPoolSvc
 
 			# Machine accounts don't need HTTP service class - it's already included in the HOST service class.
 			$serviceType = "host"
